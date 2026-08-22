@@ -1,44 +1,40 @@
-"""Point d'entrée de l'application Flask (factory pattern)."""
+from flask import Flask, request, jsonify
+import os
+from logiflow_ai_service.routes.copilot import copilot_bp
+from logiflow_ai_service.routes.itinerary import itinerary_bp
+from logiflow_ai_service.routes.groupage import groupage_bp
+from logiflow_ai_service.routes.maintenance import maintenance_bp
+from logiflow_ai_service.audit.logger import log_erreur
 
-from flask import Flask, jsonify
+API_KEY = os.getenv("INTERNAL_API_KEY", "logiflow-ai-secret-2026")
 
-from logiflow_ai_service.agents.copilot.service import CopiloteService
-from logiflow_ai_service.agents.groupage.service import GroupageService
-from logiflow_ai_service.agents.itinerary.service import ItineraryService
-from logiflow_ai_service.api.v1 import bp as api_v1_bp
-from logiflow_ai_service.config import Settings, get_settings
-from logiflow_ai_service.errors import register_error_handlers
-from logiflow_ai_service.infrastructure.ollama_client import OllamaClient
-from logiflow_ai_service.infrastructure.osrm_client import OsrmClient
-from logiflow_ai_service.logging_config import configure_logging
-
-
-def create_app(settings: Settings | None = None) -> Flask:
-    settings = settings or get_settings()
-    configure_logging(settings.log_level)
-
+def create_app():
     app = Flask(__name__)
-    app.config["SETTINGS"] = settings
-
-    ollama_client = OllamaClient(
-        base_url=settings.ollama_base_url,
-        model=settings.ollama_model,
-        timeout_s=settings.ollama_timeout_s,
-    )
-    osrm_client = OsrmClient(base_url=settings.osrm_base_url, timeout_s=settings.osrm_timeout_s)
-
-    app.config["COPILOTE_SERVICE"] = CopiloteService(ollama_client)
-    app.config["GROUPAGE_SERVICE"] = GroupageService()
-    app.config["ITINERARY_SERVICE"] = ItineraryService(osrm_client)
-
-    app.register_blueprint(api_v1_bp)
-    register_error_handlers(app)
-
-    @app.get("/health")
+    
+    @app.route('/health')
     def health():
-        # Endpoint public (pas de clé API) : sondé par Docker/l'orchestrateur, pas par Spring
-        # Boot. Ne vérifie pas la disponibilité d'Ollama/OSRM (readiness applicative, pas
-        # dépendance à un service tiers qui peut légitimement fluctuer).
-        return jsonify({"status": "UP"}), 200
-
+        return {"status": "UP"}
+    
+    # Middleware pour valider la clé API
+    @app.before_request
+    def valider_cle_api():
+        if request.endpoint == 'health':
+            return  # Ne pas bloquer /health
+        
+        api_key = request.headers.get('X-Internal-Api-Key')
+        if not api_key or api_key != API_KEY:
+            log_erreur(request.endpoint or "unknown", "Clé API invalide")
+            return jsonify({"error": "Clé API invalide"}), 401
+    
+    # Enregistrer les routes
+    app.register_blueprint(copilot_bp)
+    app.register_blueprint(itinerary_bp)
+    app.register_blueprint(groupage_bp)
+    app.register_blueprint(maintenance_bp)
+    
     return app
+
+if __name__ == "__main__":
+    app = create_app()
+    port = int(os.getenv('PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=True)
