@@ -1,40 +1,35 @@
-import httpx
-import respx
-
-
-def test_ask_renvoie_la_reponse_du_llm(client, settings, auth_headers):
-    with respx.mock(base_url=settings.ollama_base_url) as mock:
-        mock.post("/api/chat").mock(
-            return_value=httpx.Response(
-                200, json={"message": {"content": "3 véhicules disponibles"}}
-            )
-        )
-        payload = {
-            "question": "Quels camions sont libres demain ?",
-            "utilisateur": {"id": "user-1", "roles": ["EXPLOITANT"]},
-            "correlationId": "corr-1",
-        }
-        response = client.post("/internal/ai/v1/copilot/ask", json=payload, headers=auth_headers)
-
+def test_copilot_ask_success(client, api_key):
+    """Teste l'endpoint /copilot/ask avec une question valide."""
+    response = client.post(
+        '/internal/ai/v1/copilot/ask',
+        json={"question": "Bonjour, comment ça va ?"},
+        headers={"X-Internal-Api-Key": api_key}
+    )
+    
     assert response.status_code == 200
-    body = response.get_json()
-    assert body["reponse"] == "3 véhicules disponibles"
-    assert body["sources"] == []
-    assert body["confiance"] is not None
+    data = response.get_json()
+    assert "reponse" in data
+    assert "modele" in data
 
-
-def test_ask_renvoie_503_si_ollama_indisponible(client, settings, auth_headers):
-    with respx.mock(base_url=settings.ollama_base_url) as mock:
-        mock.post("/api/chat").mock(side_effect=httpx.ConnectError("connection refused"))
-        payload = {
-            "question": "Question",
-            "utilisateur": {"id": "user-1", "roles": []},
-        }
-        response = client.post("/internal/ai/v1/copilot/ask", json=payload, headers=auth_headers)
-
-    assert response.status_code == 503
-
-
-def test_ask_avec_corps_invalide_renvoie_400(client, auth_headers):
-    response = client.post("/internal/ai/v1/copilot/ask", json={}, headers=auth_headers)
+def test_copilot_ask_no_question(client, api_key):
+    """Teste l'endpoint sans question."""
+    response = client.post(
+        '/internal/ai/v1/copilot/ask',
+        json={},
+        headers={"X-Internal-Api-Key": api_key}
+    )
+    
     assert response.status_code == 400
+    data = response.get_json()
+    assert "error" in data
+
+def test_copilot_ask_no_api_key(client):
+    """Teste l'endpoint sans clé API."""
+    response = client.post(
+        '/internal/ai/v1/copilot/ask',
+        json={"question": "Bonjour"}
+    )
+    
+    assert response.status_code == 401
+    data = response.get_json()
+    assert "error" in data

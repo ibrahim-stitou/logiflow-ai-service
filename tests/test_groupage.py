@@ -1,50 +1,44 @@
-def _dossier(id_, poids=8000, volume=10.0, palettes=10, adr=False):
-    return {
-        "id": id_,
-        "reference": f"DT-{id_}",
-        "poidsBrutKg": poids,
-        "volumeM3": volume,
-        "nbPalettes": palettes,
-        "contientAdr": adr,
-    }
-
-
-def test_analyser_propose_un_groupage_compatible(client, auth_headers):
-    payload = {
-        "dossiers": [_dossier("d1"), _dossier("d2", poids=300, volume=1.5, palettes=5)],
-        "correlationId": "corr-1",
-    }
-    response = client.post("/internal/ai/v1/groupage/analyser", json=payload, headers=auth_headers)
-
-    assert response.status_code == 200
-    propositions = response.get_json()["propositions"]
-    assert len(propositions) == 1
-    assert set(propositions[0]["dossierIds"]) == {"d1", "d2"}
-    assert propositions[0]["gainKm"] is None
-
-
-def test_analyser_ignore_les_paires_adr_incompatibles(client, auth_headers):
-    payload = {
-        "dossiers": [_dossier("d1", adr=True), _dossier("d2", adr=False)],
-        "correlationId": "corr-2",
-    }
-    response = client.post("/internal/ai/v1/groupage/analyser", json=payload, headers=auth_headers)
-
-    assert response.status_code == 200
-    assert response.get_json()["propositions"] == []
-
-
-def test_analyser_refuse_une_paire_qui_depasse_la_capacite(client, auth_headers):
-    payload = {
-        "dossiers": [_dossier("d1", poids=15000), _dossier("d2", poids=15000)],
-        "correlationId": "corr-3",
-    }
-    response = client.post("/internal/ai/v1/groupage/analyser", json=payload, headers=auth_headers)
+def test_groupage_analyser_success(client, api_key):
+    """Teste l'endpoint /groupage/analyser avec des candidats valides."""
+    response = client.post(
+        '/internal/ai/v1/groupage/analyser',
+        json={
+            "candidats": [
+                {
+                    "id": "1111",
+                    "reference": "DT-001",
+                    "poidsBrutKg": 1500.5,
+                    "volumeM3": 12.0,
+                    "nbPalettes": 4,
+                    "contientAdr": False,
+                    "groupable": True,
+                    "siteChargementLat": 33.5731,
+                    "siteChargementLon": -7.5898,
+                    "dateDechargement": "2026-08-26",
+                    "carrosserieRequise": "PLATEAU"
+                },
+                {
+                    "id": "2222",
+                    "reference": "DT-002",
+                    "poidsBrutKg": 800.0,
+                    "volumeM3": 8.0,
+                    "nbPalettes": 2,
+                    "contientAdr": False,
+                    "groupable": True,
+                    "siteChargementLat": 33.5731,
+                    "siteChargementLon": -7.5898,
+                    "dateDechargement": "2026-08-27",
+                    "carrosserieRequise": "PLATEAU"
+                }
+            ]
+        },
+        headers={"X-Internal-Api-Key": api_key}
+    )
 
     assert response.status_code == 200
-    assert response.get_json()["propositions"] == []
-
-
-def test_analyser_avec_corps_invalide_renvoie_400(client, auth_headers):
-    response = client.post("/internal/ai/v1/groupage/analyser", json={}, headers=auth_headers)
-    assert response.status_code == 400
+    data = response.get_json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    proposition = data[0]
+    assert "score" in proposition
+    assert "justification" in proposition

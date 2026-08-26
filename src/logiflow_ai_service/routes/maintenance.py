@@ -10,22 +10,33 @@ def recommander():
     """Recommandation de maintenance pour un véhicule."""
     data = request.get_json()
     
-    if not data or "vehiculeId" not in data:
-        return jsonify({"error": "Champ 'vehiculeId' manquant"}), 400
+    # Debug
+    print(f"🔍 Données reçues: {data}")
+    
+    # Vérification des données
+    if not data:
+        print("❌ data est None ou vide")
+        return jsonify({"error": "Données manquantes"}), 400
+    
+    if "vehicule" not in data:
+        print(f"❌ La clé 'vehicule' n'existe pas. Clés disponibles: {data.keys()}")
+        return jsonify({"error": "Champ 'vehicule' manquant"}), 400
     
     user_id = request.headers.get("X-User-Id", "anonymous")
-    vehicule_id = data["vehiculeId"]
+    vehicule = data["vehicule"]
+    
+    print(f"✅ Données valides, véhicule: {vehicule}")
     
     debut = time.time()
     
     try:
-        resultat = calculer_score_sante(vehicule_id)
+        resultat = calculer_score_sante(vehicule)
         duree = int((time.time() - debut) * 1000)
         
         log_ia_interaction(
             user_id,
             "maintenance/recommander",
-            f"Véhicule {vehicule_id}",
+            f"Véhicule {vehicule.get('id', 'inconnu')}",
             str(resultat),
             True,
             duree
@@ -35,4 +46,5 @@ def recommander():
         
     except Exception as e:
         log_erreur("maintenance/recommander", str(e), user_id)
+        print(f"❌ Erreur: {e}")
         return jsonify({"error": "Erreur interne"}), 500

@@ -5,6 +5,7 @@ from logiflow_ai_service.routes.itinerary import itinerary_bp
 from logiflow_ai_service.routes.groupage import groupage_bp
 from logiflow_ai_service.routes.maintenance import maintenance_bp
 from logiflow_ai_service.audit.logger import log_erreur
+from logiflow_ai_service.routes.chauffeur import chauffeur_bp
 
 API_KEY = os.getenv("INTERNAL_API_KEY", "logiflow-ai-secret-2026")
 
@@ -31,6 +32,7 @@ def create_app():
     app.register_blueprint(itinerary_bp)
     app.register_blueprint(groupage_bp)
     app.register_blueprint(maintenance_bp)
+    app.register_blueprint(chauffeur_bp)
     
     return app
 
