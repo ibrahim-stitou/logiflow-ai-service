@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import os
+from logiflow_ai_service.services.database import init_db
 from logiflow_ai_service.routes.copilot import copilot_bp
 from logiflow_ai_service.routes.itinerary import itinerary_bp
 from logiflow_ai_service.routes.groupage import groupage_bp
@@ -11,6 +12,9 @@ API_KEY = os.getenv("INTERNAL_API_KEY", "logiflow-ai-secret-2026")
 
 def create_app():
     app = Flask(__name__)
+
+    # Initialiser la base de données IA
+    init_db(app)
     
     @app.route('/health')
     def health():
