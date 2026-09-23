@@ -6,6 +6,7 @@ seul appelant légitime de cette API — voir docs/integration-ia.md côté back
 service à service, transporté par l'en-tête X-Internal-Api-Key.
 """
 
+import hmac
 from collections.abc import Callable
 from functools import wraps
 
@@ -19,7 +20,7 @@ def require_internal_api_key(view: Callable) -> Callable:
     def wrapper(*args, **kwargs):
         expected = current_app.config["SETTINGS"].internal_api_key
         provided = request.headers.get(API_KEY_HEADER)
-        if not provided or provided != expected:
+        if not provided or not hmac.compare_digest(provided.encode(), expected.encode()):
             return (
                 jsonify(
                     {
