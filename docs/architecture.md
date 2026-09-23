@@ -11,14 +11,21 @@ complet côté appelant.
 ```mermaid
 graph LR
     SB[Spring Boot<br/>logiflow-backend] -->|X-Internal-Api-Key| FL[Flask<br/>logiflow-ai-service]
+    FL -->|outils du copilote<br/>clé de rappel + jeton de contexte| SB
     FL --> OL[Ollama<br/>LLM auto-hébergé]
     FL --> OS[OSRM<br/>routing]
+    FL --> DB[(PostgreSQL<br/>logiflow_ai)]
 ```
 
 Conséquences :
 
 - Aucun accès direct à la base de données PostgreSQL du TMS : tout ce dont un agent a besoin lui
-  est transmis dans le corps de la requête HTTP par Spring Boot.
+  est transmis dans le corps de la requête HTTP par Spring Boot ou, pour le copilote, obtenu en
+  appelant les outils métier exposés par Spring (`/internal/copilote/outils/**`), qui appliquent
+  les droits de l'utilisateur.
+- Une base **propre** au service, `logiflow_ai` (schéma `copilote`, pgvector) : conversations,
+  messages, appels d'outils, avis, base de connaissance. Migrations Alembic (`migrations/`).
+  Voir l'ADR 0004 dans `logiflow-backend/docs/adr/`.
 - Aucune connaissance du JWT utilisateur ni de Keycloak : l'authentification utilisateur s'arrête
   au backend.
 - Les modèles de langage sont servis par **Ollama**, auto-hébergé (pas d'appel à une API LLM
@@ -45,10 +52,20 @@ src/logiflow_ai_service/
     schemas.py                  contrat Pydantic (requête/réponse), voir integration-ia.md
     service.py                  logique métier de l'agent
 
+  agents/copilot/             chatbot
+    model.py                    dataclasses + protocoles des repositories
+    orchestrateur.py            historique + LLM + boucle d'outils, en événements SSE
+    outils.py                   catalogue (Spring + outils locaux) et exécution
+    prompts.py, sse.py
+
+  cli.py                      `flask ingerer` : base de connaissance
+
   infrastructure/             clients vers les services externes
-    ollama_client.py            appels au LLM (agent copilote)
-    osrm_client.py               appels au moteur de routing (agent itinéraire)
-    exceptions.py                 UpstreamServiceError, traduite en 503 par les routes
+    ollama_client.py            appels au LLM (chat streamé + outils, embeddings)
+    backend_client.py           outils du copilote exposés par Spring Boot
+    osrm_client.py              appels au moteur de routing (agent itinéraire)
+    db.py, persistence/         SQLAlchemy : modèles et repositories de logiflow_ai
+    exceptions.py               UpstreamServiceError, traduite en 503 par les routes
 ```
 
 Chaque route API :
@@ -63,7 +80,8 @@ Chaque route API :
 
 | Agent | Route | Dépendance externe | Repli si indisponible |
 |---|---|---|---|
-| Copilote | `POST /internal/ai/v1/copilot/ask` | Ollama | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
+| Copilote (chatbot) | `/internal/ai/v1/copilot/conversations/**` | Ollama, PostgreSQL, outils Spring | Sans outils (Spring injoignable) : répond sans données métier ; sans Ollama : événement `erreur` |
+| Copilote (question unique) | `POST /internal/ai/v1/copilot/ask` | Ollama | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
 | Groupage | `POST /internal/ai/v1/groupage/analyser` | Aucune (heuristique locale) | N/A |
 | Maintenance | `POST /internal/ai/v1/maintenance/recommander` | — | Non implémenté (501) |
 | Itinéraire | `POST /internal/ai/v1/itinerary/calculer` | OSRM | Aucun (503) — une distance routière estimée sans moteur de routing serait trompeuse |
