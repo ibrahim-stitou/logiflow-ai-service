@@ -97,9 +97,11 @@ def create_app(
             {
                 "status": "UP",
                 "dependances": {
-                    "ollama": "UP" if ollama_client.est_disponible() else "DOWN",
+                    # UP, DOWN, ou MODELE_ABSENT (serveur joignable mais `ollama pull` à faire).
+                    "ollama": ollama_client.etat(),
                     "base": _etat_base(engine),
                 },
+                "modele": ollama_client.model,
             }
         ), 200
 

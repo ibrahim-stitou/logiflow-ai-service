@@ -150,7 +150,18 @@ class OllamaClient:
         return embeddings
 
     def est_disponible(self) -> bool:
+        return self.etat() != "DOWN"
+
+    def etat(self) -> str:
+        """UP (serveur joignable, modèle de chat téléchargé), MODELE_ABSENT ou DOWN."""
         try:
-            return httpx.get(f"{self._base_url}/api/tags", timeout=2.0).is_success
-        except httpx.HTTPError:
-            return False
+            # 5 s : sur une machine chargée (LLM en mémoire), 2 s donnait de faux « DOWN ».
+            response = httpx.get(f"{self._base_url}/api/tags", timeout=5.0)
+            if not response.is_success:
+                return "DOWN"
+            noms = {m.get("name") for m in response.json().get("models") or []}
+        except (httpx.HTTPError, ValueError):
+            return "DOWN"
+        # Ollama suffixe ":latest" quand aucune étiquette n'est donnée.
+        attendus = {self._model, f"{self._model}:latest"}
+        return "UP" if noms & attendus else "MODELE_ABSENT"
