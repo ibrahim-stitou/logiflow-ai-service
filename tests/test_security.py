@@ -1,11 +1,11 @@
 def test_route_protegee_sans_cle_renvoie_401(client):
-    response = client.post("/internal/ai/v1/groupage/analyser", json={"dossiers": []})
+    response = client.post("/internal/ai/v1/planification/proposer", json={"dossiers": []})
     assert response.status_code == 401
 
 
 def test_route_protegee_avec_mauvaise_cle_renvoie_401(client):
     response = client.post(
-        "/internal/ai/v1/groupage/analyser",
+        "/internal/ai/v1/planification/proposer",
         json={"dossiers": []},
         headers={"X-Internal-Api-Key": "mauvaise-cle"},
     )

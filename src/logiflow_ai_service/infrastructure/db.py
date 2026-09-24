@@ -1,7 +1,7 @@
 """Connexion à la base propre du service IA (`logiflow_ai`).
 
 L'engine est créé paresseusement : aucune connexion n'est ouverte au démarrage, si bien que les
-agents sans base (groupage, itinéraire) restent disponibles même si PostgreSQL ne l'est pas.
+agents sans base (planification, itinéraire) restent disponibles même si PostgreSQL ne l'est pas.
 """
 
 from sqlalchemy import Engine, create_engine

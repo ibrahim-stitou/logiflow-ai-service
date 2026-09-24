@@ -72,3 +72,33 @@ class OsrmClient:
             duree_min=route["duration"] / 60.0,
             legs=legs,
         )
+
+    def calculer_matrice(
+        self, points: list[tuple[float, float]]
+    ) -> tuple[list[list[float]], list[list[float]]]:
+        """Matrices routières point à point (service `/table`) : distances en km, durées en min.
+
+        :raises UpstreamServiceError: OSRM injoignable, en erreur, ou matrice incomplète.
+        """
+        coords = ";".join(f"{lon},{lat}" for lat, lon in points)
+        url = f"{self._base_url}/table/v1/driving/{coords}"
+        try:
+            response = httpx.get(
+                url, params={"annotations": "distance,duration"}, timeout=self._timeout_s
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("Appel OSRM /table échoué : %s", exc)
+            raise UpstreamServiceError("osrm", str(exc)) from exc
+
+        body = response.json()
+        distances = body.get("distances")
+        durees = body.get("durations")
+        if body.get("code") != "Ok" or not distances or not durees:
+            raise UpstreamServiceError("osrm", f"Matrice indisponible (code={body.get('code')})")
+        if any(v is None for ligne in distances + durees for v in ligne):
+            raise UpstreamServiceError("osrm", "Matrice incomplète (points non routables)")
+        return (
+            [[v / 1000.0 for v in ligne] for ligne in distances],
+            [[v / 60.0 for v in ligne] for ligne in durees],
+        )

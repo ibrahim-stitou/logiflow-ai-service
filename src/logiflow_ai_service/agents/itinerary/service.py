@@ -1,6 +1,6 @@
 """Agent itinéraire : calcule le meilleur trajet routier passant par une liste de points.
 
-Délègue entièrement à OSRM (routing réel sur le réseau routier) : contrairement au groupage, il
+Délègue entièrement à OSRM (routing réel sur le réseau routier) : contrairement au planificateur, il
 n'existe pas de repli déterministe pertinent en cas d'indisponibilité — estimer une distance
 routière sans moteur de routing reviendrait à afficher un chiffre trompeur. Voir
 `AiServiceHttpAdapter` côté backend : cet agent propage l'échec en 503 comme le copilote.

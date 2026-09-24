@@ -12,8 +12,8 @@ from logiflow_ai_service.agents.copilot.model import (
 from logiflow_ai_service.agents.copilot.orchestrateur import CopiloteOrchestrateur
 from logiflow_ai_service.agents.copilot.outils import BoiteOutils
 from logiflow_ai_service.agents.copilot.service import ConversationService, CopiloteService
-from logiflow_ai_service.agents.groupage.service import GroupageService
 from logiflow_ai_service.agents.itinerary.service import ItineraryService
+from logiflow_ai_service.agents.planification.service import PlanificationService
 from logiflow_ai_service.api.v1 import bp as api_v1_bp
 from logiflow_ai_service.cli import enregistrer_commandes
 from logiflow_ai_service.config import Settings, get_settings
@@ -86,7 +86,7 @@ def create_app(
     app.config["CONNAISSANCE_REPOSITORY"] = connaissance_repository
     app.config["COPILOTE_SERVICE"] = CopiloteService(llm_client)
     app.config["CONVERSATION_SERVICE"] = ConversationService(conversation_repository, orchestrateur)
-    app.config["GROUPAGE_SERVICE"] = GroupageService()
+    app.config["PLANIFICATION_SERVICE"] = PlanificationService(osrm_client, llm_client)
     app.config["ITINERARY_SERVICE"] = ItineraryService(osrm_client)
 
     app.register_blueprint(api_v1_bp)
