@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.1:8b"
     ollama_embed_model: str = "nomic-embed-text"
     ollama_timeout_s: float = 30.0
-    # Délai maximal entre deux fragments du flux (le premier token peut être lent à froid).
-    ollama_stream_timeout_s: float = 120.0
+    # Délai maximal entre deux fragments du flux : sur CPU, lire un prompt de ~1 500 tokens
+    # (outils inclus) avant le premier token peut prendre plusieurs minutes.
+    ollama_stream_timeout_s: float = 600.0
     ollama_num_ctx: int = 8192
     ollama_temperature: float = 0.2
 
@@ -37,6 +38,8 @@ class Settings(BaseSettings):
     copilote_max_iterations_outils: int = 4
     copilote_historique_max: int = 20
     copilote_titre_llm: bool = True
+    # Intervalle des événements `attente` émis tant que le LLM n'a rien produit.
+    copilote_battement_s: float = 10.0
 
     # --- OSRM (routing / géolocalisation) ---
     # Démo publique par défaut ; à remplacer par une instance auto-hébergée en production

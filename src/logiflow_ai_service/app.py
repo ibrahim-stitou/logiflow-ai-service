@@ -74,6 +74,7 @@ def create_app(
         max_iterations_outils=settings.copilote_max_iterations_outils,
         historique_max=settings.copilote_historique_max,
         titre_llm=settings.copilote_titre_llm,
+        battement_s=settings.copilote_battement_s,
     )
 
     app.config["OLLAMA_CLIENT"] = ollama_client

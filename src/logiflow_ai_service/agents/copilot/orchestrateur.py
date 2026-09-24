@@ -8,6 +8,9 @@
    (dans la limite de `max_iterations_outils`), les exécute via Spring et relance le LLM ;
 4. streame les tokens de la réponse finale, puis persiste la réponse et ses sources.
 
+Pendant que le LLM lit son prompt (long sur CPU), un événement `attente` est émis toutes les
+`battement_s` secondes pour que Spring et le navigateur ne coupent pas la connexion.
+
 Si le client se déconnecte (bouton Stop → Spring ferme le flux), le générateur reçoit
 `GeneratorExit` : la réponse partielle est persistée avec le statut `interrompu`.
 """
@@ -19,6 +22,7 @@ from collections.abc import Callable, Iterator
 from datetime import date
 from typing import Any
 
+from logiflow_ai_service.agents.copilot.battements import avec_battements
 from logiflow_ai_service.agents.copilot.model import (
     AppelOutil,
     Conversation,
@@ -53,7 +57,9 @@ class CopiloteOrchestrateur:
         historique_max: int,
         titre_llm: bool,
         aujourd_hui: Callable[[], date] = date.today,
+        battement_s: float = 10.0,
     ) -> None:
+        self._battement_s = battement_s
         self._repository = repository
         self._ollama = ollama
         self._outils = outils
@@ -76,6 +82,8 @@ class CopiloteOrchestrateur:
             statut=StatutMessage.EN_COURS,
             modele=self._ollama.model,
         )
+        # Persistée dès maintenant : les appels d'outils y font référence (clé étrangère).
+        self._repository.enregistrer_message(reponse)
         yield "meta", {"conversationId": str(conversation.id), "messageId": str(reponse.id)}
 
         debut = time.monotonic()
@@ -148,7 +156,12 @@ class CopiloteOrchestrateur:
             outils_du_tour = outils_ollama if iteration < self._max_iterations else None
             texte_du_tour = ""
             appels: list[dict[str, Any]] = []
-            for fragment in self._ollama.chat_stream(messages, outils_du_tour):
+            for fragment in avec_battements(
+                self._ollama.chat_stream(messages, outils_du_tour), self._battement_s
+            ):
+                if fragment is None:
+                    yield "attente", {}
+                    continue
                 if fragment.contenu:
                     texte_du_tour += fragment.contenu
                     reponse.contenu += fragment.contenu

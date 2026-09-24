@@ -59,6 +59,9 @@ class ConversationRepositoryMemoire:
         return messages[-limite:] if limite else messages
 
     def enregistrer_appel_outil(self, appel: AppelOutil) -> None:
+        # Même contrainte que la clé étrangère appel_outil.message_id en base.
+        if appel.message_id not in self.messages_par_id:
+            raise AssertionError(f"message {appel.message_id} non persisté (clé étrangère)")
         self.appels_outils.append(appel)
 
     def enregistrer_feedback(self, message_id, utilisateur_id, note, commentaire) -> bool:
