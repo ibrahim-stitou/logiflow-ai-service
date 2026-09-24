@@ -22,12 +22,14 @@ class Settings(BaseSettings):
     # .env.example : Google Gemini, Mistral, OpenRouter, OpenAI.
     llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_timeout_s: float = 30.0
     # Délai maximal entre deux fragments du flux (file d'attente du fournisseur incluse).
     llm_stream_timeout_s: float = 120.0
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1024
+    # true si le poste casse le TLS 1.3 d'OpenSSL (antivirus/pare-feu : erreur « bad record mac »).
+    llm_forcer_tls12: bool = False
 
     # --- Embeddings (base de connaissance) : optionnels ---
     # Vides = base de connaissance désactivée (Groq n'en fournit pas). Base/clé par défaut :

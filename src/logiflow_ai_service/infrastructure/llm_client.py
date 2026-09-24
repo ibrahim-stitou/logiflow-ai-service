@@ -12,6 +12,7 @@ OpenRouter, OpenAI… (voir .env.example). Le fournisseur se choisit par configu
 
 import json
 import logging
+import ssl
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -59,6 +60,7 @@ class LlmClient:
         embed_base_url: str | None = None,
         embed_api_key: str | None = None,
         embed_model: str | None = None,
+        forcer_tls12: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -70,6 +72,7 @@ class LlmClient:
         self._embed_base_url = (embed_base_url or base_url).rstrip("/")
         self._embed_api_key = embed_api_key or api_key
         self._embed_model = embed_model or None
+        self._http = httpx.Client(verify=_contexte_tls(forcer_tls12))
 
     @property
     def model(self) -> str:
@@ -103,7 +106,7 @@ class LlmClient:
             ]
         )
         try:
-            response = httpx.post(
+            response = self._http.post(
                 f"{self._base_url}/chat/completions",
                 json=corps,
                 headers=self._headers(),
@@ -148,7 +151,7 @@ class LlmClient:
         usage: dict[str, Any] = {}
         timeout = httpx.Timeout(self._stream_timeout_s, connect=10.0)
         try:
-            with httpx.stream(
+            with self._http.stream(
                 "POST",
                 f"{self._base_url}/chat/completions",
                 json=corps,
@@ -198,7 +201,7 @@ class LlmClient:
         if self._embed_model is None:
             raise UpstreamServiceError(_SERVICE, "Aucun modèle d'embeddings configuré")
         try:
-            response = httpx.post(
+            response = self._http.post(
                 f"{self._embed_base_url}/embeddings",
                 json={"model": self._embed_model, "input": textes},
                 headers=self._headers(self._embed_api_key),
@@ -218,7 +221,9 @@ class LlmClient:
         if not self._api_key:
             return "CLE_ABSENTE"
         try:
-            response = httpx.get(f"{self._base_url}/models", headers=self._headers(), timeout=5.0)
+            response = self._http.get(
+                f"{self._base_url}/models", headers=self._headers(), timeout=5.0
+            )
         except httpx.HTTPError:
             return "DOWN"
         if response.status_code in (401, 403):
@@ -232,6 +237,19 @@ class LlmClient:
         # Certains fournisseurs préfixent (ex. Gemini : "models/gemini-…").
         disponible = any(i == self._model or (i or "").endswith("/" + self._model) for i in ids)
         return "UP" if disponible or not ids else "MODELE_ABSENT"
+
+
+def _contexte_tls(forcer_tls12: bool) -> ssl.SSLContext:
+    """Contexte TLS standard ; `forcer_tls12` plafonne à TLS 1.2.
+
+    Contournement pour les postes où un antivirus / pare-feu inspectant le TLS casse le handshake
+    TLS 1.3 d'OpenSSL vers certains fournisseurs (erreur « bad record mac » vers Groq/Cloudflare,
+    alors que curl, qui utilise la pile TLS de Windows, passe).
+    """
+    contexte = ssl.create_default_context()
+    if forcer_tls12:
+        contexte.maximum_version = ssl.TLSVersion.TLSv1_2
+    return contexte
 
 
 def _verifier(response: httpx.Response) -> None:

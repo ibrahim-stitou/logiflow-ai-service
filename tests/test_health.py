@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-MODELES = {"data": [{"id": "llama-3.3-70b-versatile"}, {"id": "llama-3.1-8b-instant"}]}
+MODELES = {"data": [{"id": "openai/gpt-oss-120b"}, {"id": "openai/gpt-oss-20b"}]}
 
 
 @pytest.mark.parametrize(
@@ -25,7 +25,7 @@ def test_health_detaille_l_etat_du_llm(client, settings, reponse_models, attendu
 
     assert corps["status"] == "UP"
     assert corps["dependances"]["llm"] == attendu
-    assert corps["modele"] == "llama-3.3-70b-versatile"
+    assert corps["modele"] == "openai/gpt-oss-120b"
     assert corps["fournisseur"] == "llm.test"
 
 

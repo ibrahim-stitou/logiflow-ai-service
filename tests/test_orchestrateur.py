@@ -49,7 +49,7 @@ def contexte():
 
 
 def _orchestrateur(repository, connaissance=None, max_iterations=4, titre_llm=False):
-    llm = LlmClient(LLM, "cle-test", "llama-3.3-70b-versatile", 5.0, embed_model="modele-embed")
+    llm = LlmClient(LLM, "cle-test", "openai/gpt-oss-120b", 5.0, embed_model="modele-embed")
     return CopiloteOrchestrateur(
         repository,
         llm,
@@ -122,7 +122,7 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
 
     premier = json.loads(chat.calls[0].request.content)
     assert chat.calls[0].request.headers["Authorization"] == "Bearer cle-test"
-    assert premier["model"] == "llama-3.3-70b-versatile"
+    assert premier["model"] == "openai/gpt-oss-120b"
     assert premier["stream"] is True
     assert premier["tool_choice"] == "auto"
     assert [t["function"]["name"] for t in premier["tools"]] == ["rechercher_voyages"]
@@ -142,7 +142,7 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
     reponse = _assistant(repository)
     assert reponse.statut is StatutMessage.COMPLET
     assert reponse.contenu == "Un voyage en cours : VOY-2026-00003."
-    assert reponse.modele == "llama-3.3-70b-versatile"
+    assert reponse.modele == "openai/gpt-oss-120b"
     assert (reponse.tokens_prompt, reponse.tokens_completion) == (17, 7)
     assert [s.reference for s in reponse.sources] == ["VOY-2026-00003"]
     [appel] = repository.appels_outils

@@ -14,7 +14,7 @@ def settings() -> Settings:
         internal_api_key=API_KEY,
         llm_base_url="http://llm.test/v1",
         llm_api_key="cle-test",
-        llm_model="llama-3.3-70b-versatile",
+        llm_model="openai/gpt-oss-120b",
         osrm_base_url="http://osrm.test",
         backend_base_url="http://backend.test",
         backend_callback_api_key=CALLBACK_KEY,

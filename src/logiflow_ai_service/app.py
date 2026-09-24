@@ -55,6 +55,7 @@ def create_app(
         embed_base_url=settings.embed_base_url,
         embed_api_key=settings.embed_api_key,
         embed_model=settings.embed_model,
+        forcer_tls12=settings.llm_forcer_tls12,
     )
     osrm_client = OsrmClient(base_url=settings.osrm_base_url, timeout_s=settings.osrm_timeout_s)
     backend_client = BackendClient(
