@@ -285,3 +285,31 @@ def test_proposer_utilise_la_matrice_osrm(settings):
 def test_proposer_avec_corps_invalide_renvoie_400(client, auth_headers):
     response = client.post("/internal/ai/v1/planification/proposer", json={}, headers=auth_headers)
     assert response.status_code == 400
+
+
+def test_une_option_qui_n_est_pas_la_meilleure_sur_son_objectif_est_une_alternative():
+    from types import SimpleNamespace
+
+    from logiflow_ai_service.agents.planification.solveur import selectionner
+
+    def proposition(cle, remplissage, cout_tonne, nb):
+        return SimpleNamespace(
+            cle=frozenset({cle}),
+            taux_remplissage=remplissage,
+            cout=100.0,
+            cout_par_tonne=cout_tonne,
+            dossiers=[None] * nb,
+            tournee=SimpleNamespace(depart=T0),
+        )
+
+    # « a » est à la fois le mieux rempli et le moins cher à la tonne.
+    a = proposition("a", 1.0, 19.0, 1)
+    b = proposition("b", 0.6, 48.0, 3)
+    c = proposition("c", 0.7, 66.0, 2)
+
+    retenues = selectionner([a, b, c], 3)
+
+    assert [r.proposition for r in retenues] == [a, b, c]
+    assert retenues[0].libelle_objectif == "Remplissage maximal"
+    assert retenues[1].libelle_objectif == "Alternative (coût à la tonne minimal)"
+    assert retenues[2].libelle_objectif == "Alternative (le plus de dossiers servis)"

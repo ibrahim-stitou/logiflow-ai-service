@@ -457,14 +457,21 @@ class OptionRetenue:
 
 
 def selectionner(propositions: list[Proposition], nb_options: int) -> list[OptionRetenue]:
+    """Une option par objectif, toutes distinctes.
+
+    Si le meilleur candidat d'un objectif est déjà retenu, l'option suivante est présentée comme
+    une alternative : son libellé ne doit pas prétendre qu'elle est la meilleure sur ce critère.
+    """
     retenues: list[OptionRetenue] = []
     deja: set[frozenset[str]] = set()
     for code, libelle, cle in OBJECTIFS:
         if len(retenues) >= nb_options:
             break
-        for proposition in sorted(propositions, key=cle):
+        classement = sorted(propositions, key=cle)
+        for rang, proposition in enumerate(classement):
             if proposition.cle not in deja:
-                retenues.append(OptionRetenue(code, libelle, proposition))
+                intitule = libelle if rang == 0 else f"Alternative ({libelle.lower()})"
+                retenues.append(OptionRetenue(code, intitule, proposition))
                 deja.add(proposition.cle)
                 break
     return retenues
