@@ -11,9 +11,9 @@ Voir [docs/architecture.md](docs/architecture.md) pour le détail de l'architect
 
 - Python 3.13
 - [uv](https://docs.astral.sh/uv/) (gestionnaire de dépendances/environnement)
-- [Ollama](https://ollama.com/) en local (ou accessible réseau) pour l'agent copilote —
-  `ollama pull llama3.1:8b` (chat + tool-calling) et `ollama pull nomic-embed-text`
-  (embeddings de la base de connaissance), puis `ollama serve`
+- Une **clé API gratuite** d'un fournisseur LLM compatible OpenAI pour l'agent copilote.
+  Par défaut **Groq** (https://console.groq.com/keys) : renseigner `LLM_API_KEY` dans `.env`.
+  Gemini, Mistral, OpenRouter ou OpenAI se configurent de la même façon (voir `.env.example`)
 - PostgreSQL avec pgvector pour la base **propre** du service (`logiflow_ai`) : fournie par
   `docker compose -f ../logiflow-backend/docker/docker-compose.yml up -d postgres`
   (script `docker/postgres/init/02-ai-database.sql`)
@@ -48,7 +48,7 @@ curl http://localhost:8000/health
 make test
 ```
 
-Les tests mockent les appels sortants (Ollama, OSRM, outils Spring) via `respx` et utilisent des
+Les tests mockent les appels sortants (fournisseur LLM, OSRM, outils Spring) via `respx` et utilisent des
 repositories en mémoire — aucune dépendance réseau réelle n'est nécessaire. Les tests des
 repositories SQL s'exécutent si `TEST_DATABASE_URL` pointe vers une base PostgreSQL + pgvector
 jetable (ils sont ignorés sinon).

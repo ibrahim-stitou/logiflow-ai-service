@@ -96,7 +96,7 @@ def ask():
     try:
         reponse = current_app.config["COPILOTE_SERVICE"].repondre(payload)
     except UpstreamServiceError:
-        logger.warning("Agent copilote indisponible (Ollama injoignable)", exc_info=True)
+        logger.warning("Agent copilote indisponible (fournisseur LLM injoignable)", exc_info=True)
         return jsonify({"title": "Service IA indisponible", "status": 503}), 503
 
     return jsonify(reponse.model_dump(by_alias=True)), 200

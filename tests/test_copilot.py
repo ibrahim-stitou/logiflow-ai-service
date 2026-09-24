@@ -1,14 +1,12 @@
 import httpx
 import respx
 
+from tests.llm_mock import CHAT, reponse_chat
+
 
 def test_ask_renvoie_la_reponse_du_llm(client, settings, auth_headers):
-    with respx.mock(base_url=settings.ollama_base_url) as mock:
-        mock.post("/api/chat").mock(
-            return_value=httpx.Response(
-                200, json={"message": {"content": "3 véhicules disponibles"}}
-            )
-        )
+    with respx.mock() as mock:
+        mock.post(CHAT).mock(return_value=reponse_chat("3 véhicules disponibles"))
         payload = {
             "question": "Quels camions sont libres demain ?",
             "utilisateur": {"id": "user-1", "roles": ["EXPLOITANT"]},
@@ -23,9 +21,9 @@ def test_ask_renvoie_la_reponse_du_llm(client, settings, auth_headers):
     assert body["confiance"] is not None
 
 
-def test_ask_renvoie_503_si_ollama_indisponible(client, settings, auth_headers):
-    with respx.mock(base_url=settings.ollama_base_url) as mock:
-        mock.post("/api/chat").mock(side_effect=httpx.ConnectError("connection refused"))
+def test_ask_renvoie_503_si_llm_indisponible(client, settings, auth_headers):
+    with respx.mock() as mock:
+        mock.post(CHAT).mock(side_effect=httpx.ConnectError("connection refused"))
         payload = {
             "question": "Question",
             "utilisateur": {"id": "user-1", "roles": []},

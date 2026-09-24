@@ -3,15 +3,13 @@ import json
 import httpx
 import respx
 
+from tests.llm_mock import CHAT, texte
+
 BASE = "/internal/ai/v1/copilot"
 
 
 def _headers(auth_headers, utilisateur="user-1"):
     return {**auth_headers, "X-Utilisateur-Id": utilisateur}
-
-
-def _ndjson(*morceaux: dict) -> bytes:
-    return "\n".join(json.dumps(m) for m in morceaux).encode()
 
 
 def _evenements(corps: str) -> list[tuple[str, dict]]:
@@ -99,16 +97,7 @@ def test_envoyer_un_message_streame_la_reponse_et_la_persiste(client, auth_heade
         mock.get(f"{settings.backend_base_url}/internal/copilote/outils").mock(
             return_value=httpx.Response(200, json=[])
         )
-        mock.post(f"{settings.ollama_base_url}/api/chat").mock(
-            return_value=httpx.Response(
-                200,
-                content=_ndjson(
-                    {"message": {"content": "Bon"}, "done": False},
-                    {"message": {"content": "jour !"}, "done": False},
-                    {"message": {"content": ""}, "done": True, "eval_count": 3},
-                ),
-            )
-        )
+        mock.post(CHAT).mock(return_value=texte("Bon", "jour !"))
         response = client.post(
             f"{BASE}/conversations/{creee['id']}/messages",
             json=_message(),

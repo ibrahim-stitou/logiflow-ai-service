@@ -17,16 +17,24 @@ class Settings(BaseSettings):
         "postgresql+psycopg://logiflow_ai:change-me-local-only@localhost:5433/logiflow_ai"
     )
 
-    # --- Ollama (LLM auto-hébergé) ---
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1:8b"
-    ollama_embed_model: str = "nomic-embed-text"
-    ollama_timeout_s: float = 30.0
-    # Délai maximal entre deux fragments du flux : sur CPU, lire un prompt de ~1 500 tokens
-    # (outils inclus) avant le premier token peut prendre plusieurs minutes.
-    ollama_stream_timeout_s: float = 600.0
-    ollama_num_ctx: int = 8192
-    ollama_temperature: float = 0.2
+    # --- LLM : tout fournisseur compatible OpenAI (/chat/completions) ---
+    # Groq par défaut (palier gratuit, rapide, tool-calling fiable). Autres exemples dans
+    # .env.example : Google Gemini, Mistral, OpenRouter, OpenAI.
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_api_key: str = ""
+    llm_model: str = "llama-3.3-70b-versatile"
+    llm_timeout_s: float = 30.0
+    # Délai maximal entre deux fragments du flux (file d'attente du fournisseur incluse).
+    llm_stream_timeout_s: float = 120.0
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 1024
+
+    # --- Embeddings (base de connaissance) : optionnels ---
+    # Vides = base de connaissance désactivée (Groq n'en fournit pas). Base/clé par défaut :
+    # celles du LLM. Changer de modèle impose de réingérer (`make ingerer`).
+    embed_base_url: str | None = None
+    embed_api_key: str | None = None
+    embed_model: str | None = None
 
     # --- Rappel des outils métier exposés par Spring Boot (/internal/copilote/**) ---
     backend_base_url: str = "http://localhost:8080"
@@ -43,7 +51,7 @@ class Settings(BaseSettings):
 
     # --- OSRM (routing / géolocalisation) ---
     # Démo publique par défaut ; à remplacer par une instance auto-hébergée en production
-    # (cohérent avec Ollama : aucune dépendance à un service tiers payant).
+    # (aucune dépendance à un service tiers payant).
     osrm_base_url: str = "https://router.project-osrm.org"
     osrm_timeout_s: float = 10.0
 

@@ -12,7 +12,7 @@ complet côté appelant.
 graph LR
     SB[Spring Boot<br/>logiflow-backend] -->|X-Internal-Api-Key| FL[Flask<br/>logiflow-ai-service]
     FL -->|outils du copilote<br/>clé de rappel + jeton de contexte| SB
-    FL --> OL[Ollama<br/>LLM auto-hébergé]
+    FL --> OL[LLM cloud<br/>compatible OpenAI : Groq…]
     FL --> OS[OSRM<br/>routing]
     FL --> DB[(PostgreSQL<br/>logiflow_ai)]
 ```
@@ -28,8 +28,11 @@ Conséquences :
   Voir l'ADR 0004 dans `logiflow-backend/docs/adr/`.
 - Aucune connaissance du JWT utilisateur ni de Keycloak : l'authentification utilisateur s'arrête
   au backend.
-- Les modèles de langage sont servis par **Ollama**, auto-hébergé (pas d'appel à une API LLM
-  tierce payante) — cohérent avec le choix d'OSRM pour le routing.
+- Les modèles de langage sont servis par un **fournisseur cloud compatible OpenAI**, choisi par
+  configuration (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`) — Groq par défaut, palier gratuit.
+  Projet d'apprentissage et de démonstration : un LLM local (Ollama) s'est révélé trop lent sur
+  CPU (plusieurs minutes par réponse). Le palier gratuit évite toute dépendance payante, comme OSRM
+  pour le routing.
 
 ## Structure des packages
 
@@ -61,7 +64,7 @@ src/logiflow_ai_service/
   cli.py                      `flask ingerer` : base de connaissance
 
   infrastructure/             clients vers les services externes
-    ollama_client.py            appels au LLM (chat streamé + outils, embeddings)
+    llm_client.py               LLM compatible OpenAI (chat streamé + outils, embeddings)
     backend_client.py           outils du copilote exposés par Spring Boot
     osrm_client.py              appels au moteur de routing (agent itinéraire)
     db.py, persistence/         SQLAlchemy : modèles et repositories de logiflow_ai
@@ -80,8 +83,8 @@ Chaque route API :
 
 | Agent | Route | Dépendance externe | Repli si indisponible |
 |---|---|---|---|
-| Copilote (chatbot) | `/internal/ai/v1/copilot/conversations/**` | Ollama, PostgreSQL, outils Spring | Sans outils (Spring injoignable) : répond sans données métier ; sans Ollama : événement `erreur` |
-| Copilote (question unique) | `POST /internal/ai/v1/copilot/ask` | Ollama | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
+| Copilote (chatbot) | `/internal/ai/v1/copilot/conversations/**` | LLM cloud, PostgreSQL, outils Spring | Sans outils (Spring injoignable) : répond sans données métier ; LLM injoignable ou quota atteint : événement `erreur` |
+| Copilote (question unique) | `POST /internal/ai/v1/copilot/ask` | LLM cloud | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
 | Groupage | `POST /internal/ai/v1/groupage/analyser` | Aucune (heuristique locale) | N/A |
 | Maintenance | `POST /internal/ai/v1/maintenance/recommander` | — | Non implémenté (501) |
 | Itinéraire | `POST /internal/ai/v1/itinerary/calculer` | OSRM | Aucun (503) — une distance routière estimée sans moteur de routing serait trompeuse |
@@ -92,7 +95,7 @@ transmette les coordonnées des sites de chargement/déchargement.
 
 ## Déploiement cible
 
-Ollama tourne sur un serveur dédié (provisionné via Terraform), le service Flask et le backend
+Le LLM est un service cloud (clé API) ; le service Flask et le backend
 Spring Boot dans WSL/conteneurs sur le même réseau interne — voir le dépôt d'infrastructure une
 fois disponible. En attendant, `docker/docker-compose.yml` de `logiflow-backend` prévoit un bloc
 `ai-service` (commenté) pointant vers ce dépôt.

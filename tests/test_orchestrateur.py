@@ -15,10 +15,10 @@ from logiflow_ai_service.agents.copilot.model import (
 from logiflow_ai_service.agents.copilot.orchestrateur import CopiloteOrchestrateur
 from logiflow_ai_service.agents.copilot.outils import BoiteOutils, ContexteAppel
 from logiflow_ai_service.infrastructure.backend_client import BackendClient
-from logiflow_ai_service.infrastructure.ollama_client import OllamaClient
+from logiflow_ai_service.infrastructure.llm_client import LlmClient
 from tests.fakes import ConnaissanceRepositoryMemoire, ConversationRepositoryMemoire
+from tests.llm_mock import CHAT, LLM, appel_outil, reponse_chat, sse, texte
 
-OLLAMA = "http://ollama.test"
 BACKEND = "http://backend.test"
 
 CATALOGUE = [
@@ -29,30 +29,6 @@ CATALOGUE = [
         "parametres": {"type": "object", "properties": {"statut": {"type": "string"}}},
     }
 ]
-
-
-def _ndjson(*morceaux: dict) -> httpx.Response:
-    return httpx.Response(200, content="\n".join(json.dumps(m) for m in morceaux).encode())
-
-
-def _texte(texte: str) -> httpx.Response:
-    return _ndjson(
-        {"message": {"content": texte}, "done": False},
-        {"message": {"content": ""}, "done": True, "prompt_eval_count": 10, "eval_count": 5},
-    )
-
-
-def _appel_outil(nom: str, arguments) -> httpx.Response:
-    return _ndjson(
-        {
-            "message": {
-                "content": "",
-                "tool_calls": [{"function": {"name": nom, "arguments": arguments}}],
-            },
-            "done": False,
-        },
-        {"message": {"content": ""}, "done": True, "prompt_eval_count": 7, "eval_count": 2},
-    )
 
 
 @pytest.fixture
@@ -73,11 +49,11 @@ def contexte():
 
 
 def _orchestrateur(repository, connaissance=None, max_iterations=4, titre_llm=False):
-    ollama = OllamaClient(OLLAMA, "llama3.1:8b", 5.0)
+    llm = LlmClient(LLM, "cle-test", "llama-3.3-70b-versatile", 5.0, embed_model="modele-embed")
     return CopiloteOrchestrateur(
         repository,
-        ollama,
-        BoiteOutils(BackendClient(BACKEND, "cle-rappel", 5.0), ollama, connaissance),
+        llm,
+        BoiteOutils(BackendClient(BACKEND, "cle-rappel", 5.0), llm, connaissance),
         max_iterations_outils=max_iterations,
         historique_max=20,
         titre_llm=titre_llm,
@@ -90,11 +66,15 @@ def _assistant(repository) -> Message:
     return message
 
 
+def _catalogue(mock, catalogue=CATALOGUE):
+    return mock.get(f"{BACKEND}/internal/copilote/outils").mock(
+        return_value=httpx.Response(200, json=catalogue)
+    )
+
+
 def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, contexte):
     with respx.mock() as mock:
-        catalogue = mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=CATALOGUE)
-        )
+        catalogue = _catalogue(mock)
         outil = mock.post(f"{BACKEND}/internal/copilote/outils/rechercher_voyages").mock(
             return_value=httpx.Response(
                 200,
@@ -105,10 +85,10 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
                 },
             )
         )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(
+        chat = mock.post(CHAT).mock(
             side_effect=[
-                _appel_outil("rechercher_voyages", {"statut": "EN_COURS"}),
-                _texte("Un voyage en cours : VOY-2026-00003."),
+                appel_outil("rechercher_voyages", {"statut": "EN_COURS"}, "call_42"),
+                texte("Un voyage en cours : ", "VOY-2026-00003."),
             ]
         )
 
@@ -119,6 +99,7 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
         "outil",
         "outil",
         "token",
+        "token",
         "sources",
         "titre",
         "fin",
@@ -128,26 +109,41 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
         "libelle": "Recherche des voyages",
         "statut": "debut",
     }
-    assert evenements[4][1]["sources"] == [
+    assert evenements[5][1]["sources"] == [
         {"type": "VOYAGE", "reference": "VOY-2026-00003", "id": "v-3"}
     ]
     # Spring reçoit le secret de rappel et le jeton de contexte, jamais les rôles en clair.
     requete_outil = outil.calls.last.request
     assert requete_outil.headers["X-Internal-Api-Key"] == "cle-rappel"
     assert requete_outil.headers["X-Copilote-Contexte"] == "jeton-1"
+    # Arguments reçus en deux morceaux dans le flux, réassemblés.
     assert json.loads(requete_outil.content) == {"statut": "EN_COURS"}
     assert catalogue.call_count == 1
-    # Le 2e appel au LLM contient le résultat de l'outil.
+
+    premier = json.loads(chat.calls[0].request.content)
+    assert chat.calls[0].request.headers["Authorization"] == "Bearer cle-test"
+    assert premier["model"] == "llama-3.3-70b-versatile"
+    assert premier["stream"] is True
+    assert premier["tool_choice"] == "auto"
+    assert [t["function"]["name"] for t in premier["tools"]] == ["rechercher_voyages"]
+    # Le 2e appel au LLM contient l'appel d'outil (format OpenAI) puis son résultat.
     second = json.loads(chat.calls[1].request.content)
-    assert second["messages"][-1]["role"] == "tool"
-    assert "VOY-2026-00003" in second["messages"][-1]["content"]
+    appel_assistant, resultat = second["messages"][-2:]
+    assert appel_assistant["tool_calls"][0]["id"] == "call_42"
+    assert json.loads(appel_assistant["tool_calls"][0]["function"]["arguments"]) == {
+        "statut": "EN_COURS"
+    }
+    assert resultat["role"] == "tool"
+    assert resultat["tool_call_id"] == "call_42"
+    assert "VOY-2026-00003" in resultat["content"]
     assert second["messages"][0]["role"] == "system"
     assert "2026-09-23" in second["messages"][0]["content"]
 
     reponse = _assistant(repository)
     assert reponse.statut is StatutMessage.COMPLET
     assert reponse.contenu == "Un voyage en cours : VOY-2026-00003."
-    assert reponse.tokens_completion == 7
+    assert reponse.modele == "llama-3.3-70b-versatile"
+    assert (reponse.tokens_prompt, reponse.tokens_completion) == (17, 7)
     assert [s.reference for s in reponse.sources] == ["VOY-2026-00003"]
     [appel] = repository.appels_outils
     assert appel.succes and appel.nb_resultats == 1
@@ -155,16 +151,14 @@ def test_appel_d_outil_puis_reponse_avec_sources(repository, conversation, conte
 
 def test_erreur_d_outil_renvoyee_au_llm(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=CATALOGUE)
-        )
+        _catalogue(mock)
         mock.post(f"{BACKEND}/internal/copilote/outils/rechercher_voyages").mock(
             return_value=httpx.Response(400, json={"detail": "statut inconnu : XYZ"})
         )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(
+        chat = mock.post(CHAT).mock(
             side_effect=[
-                _appel_outil("rechercher_voyages", '{"statut": "XYZ"}'),
-                _texte("Statut invalide."),
+                appel_outil("rechercher_voyages", {"statut": "XYZ"}),
+                texte("Statut invalide."),
             ]
         )
         evenements = list(_orchestrateur(repository).repondre(conversation, "?", contexte))
@@ -180,12 +174,8 @@ def test_erreur_d_outil_renvoyee_au_llm(repository, conversation, contexte):
 
 def test_outil_inconnu_n_est_pas_execute(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=CATALOGUE)
-        )
-        mock.post(f"{OLLAMA}/api/chat").mock(
-            side_effect=[_appel_outil("supprimer_tout", {}), _texte("Désolé.")]
-        )
+        _catalogue(mock)
+        mock.post(CHAT).mock(side_effect=[appel_outil("supprimer_tout", {}), texte("Désolé.")])
         list(_orchestrateur(repository).repondre(conversation, "?", contexte))
 
     [appel] = repository.appels_outils
@@ -194,25 +184,23 @@ def test_outil_inconnu_n_est_pas_execute(repository, conversation, contexte):
 
 def test_boucle_d_outils_bornee(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=CATALOGUE)
-        )
+        _catalogue(mock)
         mock.post(f"{BACKEND}/internal/copilote/outils/rechercher_voyages").mock(
             return_value=httpx.Response(200, json={"resultats": [], "total": 0, "sources": []})
         )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(
+        chat = mock.post(CHAT).mock(
             side_effect=[
-                _appel_outil("rechercher_voyages", {}),
-                _appel_outil("rechercher_voyages", {}),
-                _texte("Aucun voyage."),
+                appel_outil("rechercher_voyages", {}),
+                appel_outil("rechercher_voyages", {}, "call_2"),
+                texte("Aucun voyage."),
             ]
         )
         list(_orchestrateur(repository, max_iterations=2).repondre(conversation, "?", contexte))
 
     assert chat.call_count == 3
-    # Au dernier tour, les outils ne sont plus proposés : le LLM doit conclure.
-    assert "tools" in json.loads(chat.calls[1].request.content)
-    assert "tools" not in json.loads(chat.calls[2].request.content)
+    # Au dernier tour, plus d'appel d'outil possible : le LLM doit conclure.
+    assert json.loads(chat.calls[1].request.content)["tool_choice"] == "auto"
+    assert json.loads(chat.calls[2].request.content)["tool_choice"] == "none"
 
 
 def test_catalogue_indisponible_repond_sans_outils(repository, conversation, contexte):
@@ -220,7 +208,7 @@ def test_catalogue_indisponible_repond_sans_outils(repository, conversation, con
         mock.get(f"{BACKEND}/internal/copilote/outils").mock(
             side_effect=httpx.ConnectError("refused")
         )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(return_value=_texte("Bonjour."))
+        chat = mock.post(CHAT).mock(return_value=texte("Bonjour."))
         evenements = list(_orchestrateur(repository).repondre(conversation, "Salut", contexte))
 
     assert evenements[-1][0] == "fin"
@@ -229,12 +217,10 @@ def test_catalogue_indisponible_repond_sans_outils(repository, conversation, con
     assert "aucune donnée" in corps["messages"][0]["content"]
 
 
-def test_ollama_indisponible_emet_une_erreur(repository, conversation, contexte):
+def test_llm_indisponible_emet_une_erreur(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        mock.post(f"{OLLAMA}/api/chat").mock(side_effect=httpx.ConnectError("refused"))
+        _catalogue(mock, [])
+        mock.post(CHAT).mock(side_effect=httpx.ConnectError("refused"))
         evenements = list(_orchestrateur(repository).repondre(conversation, "?", contexte))
 
     assert [nom for nom, _ in evenements] == ["meta", "erreur"]
@@ -242,18 +228,25 @@ def test_ollama_indisponible_emet_une_erreur(repository, conversation, contexte)
     assert _assistant(repository).statut is StatutMessage.ERREUR
 
 
-def test_interruption_persiste_la_reponse_partielle(repository, conversation, contexte):
+def test_quota_atteint_emet_une_erreur_explicite(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        mock.post(f"{OLLAMA}/api/chat").mock(
-            return_value=_ndjson(
-                {"message": {"content": "Début"}, "done": False},
-                {"message": {"content": " suite"}, "done": False},
-                {"message": {"content": ""}, "done": True},
+        _catalogue(mock, [])
+        mock.post(CHAT).mock(
+            return_value=httpx.Response(
+                429, json={"error": {"message": "Rate limit reached for model"}}
             )
         )
+        evenements = list(_orchestrateur(repository).repondre(conversation, "?", contexte))
+
+    assert evenements[-1][0] == "erreur"
+    assert evenements[-1][1]["code"] == "QUOTA_LLM"
+    assert "Quota" in evenements[-1][1]["message"]
+
+
+def test_interruption_persiste_la_reponse_partielle(repository, conversation, contexte):
+    with respx.mock() as mock:
+        _catalogue(mock, [])
+        mock.post(CHAT).mock(return_value=texte("Début", " suite"))
         flux = _orchestrateur(repository).repondre(conversation, "?", contexte)
         assert next(flux)[0] == "meta"
         assert next(flux) == ("token", {"texte": "Début"})
@@ -280,10 +273,8 @@ def test_historique_transmis_au_llm(repository, conversation, contexte):
         )
     )
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(return_value=_texte("Réponse 2"))
+        _catalogue(mock, [])
+        chat = mock.post(CHAT).mock(return_value=texte("Réponse 2"))
         evenements = list(_orchestrateur(repository).repondre(conversation, "Question 2", contexte))
 
     messages = json.loads(chat.calls.last.request.content)["messages"]
@@ -298,14 +289,9 @@ def test_historique_transmis_au_llm(repository, conversation, contexte):
 
 def test_titre_genere_par_le_llm(repository, conversation, contexte):
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=[])
-        )
-        mock.post(f"{OLLAMA}/api/chat").mock(
-            side_effect=[
-                _texte("Réponse"),
-                httpx.Response(200, json={"message": {"content": "« Consommation carburant »"}}),
-            ]
+        _catalogue(mock, [])
+        mock.post(CHAT).mock(
+            side_effect=[texte("Réponse"), reponse_chat("« Consommation carburant »")]
         )
         evenements = list(
             _orchestrateur(repository, titre_llm=True).repondre(conversation, "?", contexte)
@@ -320,23 +306,37 @@ def test_outil_local_base_de_connaissance(repository, conversation, contexte):
         [FragmentTrouve("guide.html", "Guide", "Pour créer un dossier, ...", 0.91)]
     )
     with respx.mock() as mock:
-        mock.get(f"{BACKEND}/internal/copilote/outils").mock(
-            return_value=httpx.Response(200, json=[])
+        _catalogue(mock, [])
+        embed = mock.post(f"{LLM}/embeddings").mock(
+            return_value=httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 8}]})
         )
-        mock.post(f"{OLLAMA}/api/embed").mock(
-            return_value=httpx.Response(200, json={"embeddings": [[0.1] * 768]})
-        )
-        chat = mock.post(f"{OLLAMA}/api/chat").mock(
+        chat = mock.post(CHAT).mock(
             side_effect=[
-                _appel_outil("rechercher_base_connaissance", {"question": "créer un dossier"}),
-                _texte("Voici comment faire."),
+                appel_outil("rechercher_base_connaissance", {"question": "créer un dossier"}),
+                texte("Voici comment faire."),
             ]
         )
         list(_orchestrateur(repository, connaissance).repondre(conversation, "?", contexte))
 
+    assert json.loads(embed.calls.last.request.content)["model"] == "modele-embed"
     premier = json.loads(chat.calls[0].request.content)
     assert [t["function"]["name"] for t in premier["tools"]] == ["rechercher_base_connaissance"]
     assert (
         "Pour créer un dossier"
         in json.loads(chat.calls[1].request.content)["messages"][-1]["content"]
+    )
+
+
+def test_erreur_du_fournisseur_dans_le_flux(repository, conversation, contexte):
+    with respx.mock() as mock:
+        _catalogue(mock, [])
+        mock.post(CHAT).mock(return_value=sse({"error": {"message": "model overloaded"}}))
+        evenements = list(_orchestrateur(repository).repondre(conversation, "?", contexte))
+
+    assert evenements[-1] == (
+        "erreur",
+        {
+            "code": "LLM_INDISPONIBLE",
+            "message": "Le moteur IA est momentanément indisponible. Réessayez plus tard.",
+        },
     )

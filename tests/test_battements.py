@@ -21,11 +21,11 @@ def test_intercale_des_battements_pendant_le_silence():
 def test_relance_l_erreur_de_la_source():
     def en_erreur():
         yield "a"
-        raise RuntimeError("ollama coupé")
+        raise RuntimeError("fournisseur coupé")
 
     iterateur = avec_battements(en_erreur(), intervalle_s=1)
     assert next(iterateur) == "a"
-    with pytest.raises(RuntimeError, match="ollama coupé"):
+    with pytest.raises(RuntimeError, match="fournisseur coupé"):
         next(iterateur)
 
 

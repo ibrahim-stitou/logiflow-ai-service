@@ -12,7 +12,9 @@ CALLBACK_KEY = "test-callback-key"
 def settings() -> Settings:
     return Settings(
         internal_api_key=API_KEY,
-        ollama_base_url="http://ollama.test",
+        llm_base_url="http://llm.test/v1",
+        llm_api_key="cle-test",
+        llm_model="llama-3.3-70b-versatile",
         osrm_base_url="http://osrm.test",
         backend_base_url="http://backend.test",
         backend_callback_api_key=CALLBACK_KEY,

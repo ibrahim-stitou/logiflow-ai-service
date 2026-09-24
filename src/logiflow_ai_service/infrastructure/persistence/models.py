@@ -20,7 +20,6 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 SCHEMA = "copilote"
-DIMENSION_EMBEDDING = 768  # nomic-embed-text
 
 
 class Base(DeclarativeBase):
@@ -112,4 +111,5 @@ class FragmentConnaissanceModel(Base):
     )
     ordre: Mapped[int] = mapped_column(Integer, nullable=False)
     contenu: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(DIMENSION_EMBEDDING), nullable=False)
+    # Dimension libre : elle dépend du modèle d'embeddings configuré (EMBED_MODEL).
+    embedding: Mapped[list[float]] = mapped_column(Vector(), nullable=False)

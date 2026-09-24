@@ -1,8 +1,8 @@
 """Commandes CLI Flask : `flask --app logiflow_ai_service.app:create_app ingerer <fichiers...>`.
 
 Ingestion de la base de connaissance du copilote : chaque fichier (.md, .txt, .html) est découpé
-en fragments, vectorisé par Ollama (`OLLAMA_EMBED_MODEL`) puis stocké dans `logiflow_ai`. Une
-réingestion remplace la version précédente du document.
+en fragments, vectorisé par le fournisseur d'embeddings (`EMBED_MODEL`) puis stocké dans
+`logiflow_ai`. Une réingestion remplace la version précédente du document.
 """
 
 import html
@@ -58,8 +58,12 @@ def enregistrer_commandes(app: Flask) -> None:
     )
     def ingerer(chemins: tuple[Path, ...]) -> None:
         """Ingère des fichiers (.md, .txt, .html) dans la base de connaissance du copilote."""
-        ollama = current_app.config["OLLAMA_CLIENT"]
+        llm = current_app.config["LLM_CLIENT"]
         repository = current_app.config["CONNAISSANCE_REPOSITORY"]
+        if repository is None or not llm.embeddings_disponibles:
+            raise click.ClickException(
+                "Base de connaissance désactivée : configurez EMBED_MODEL (voir .env.example)."
+            )
         fichiers = [
             f
             for chemin in chemins
@@ -73,7 +77,7 @@ def enregistrer_commandes(app: Flask) -> None:
                 continue
             embeddings: list[list[float]] = []
             for i in range(0, len(fragments), _LOT_EMBEDDINGS):
-                embeddings.extend(ollama.embed(fragments[i : i + _LOT_EMBEDDINGS]))
+                embeddings.extend(llm.embed(fragments[i : i + _LOT_EMBEDDINGS]))
             repository.remplacer_document(
                 fichier.as_posix(), titre, list(zip(fragments, embeddings, strict=True))
             )

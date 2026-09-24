@@ -1,6 +1,6 @@
 """Battements de cœur pendant l'attente du LLM.
 
-Sur CPU, un LLM local peut lire un long prompt (outils inclus) pendant plusieurs minutes avant le
+Un LLM peut mettre du temps (outils, file d'attente du fournisseur) avant de produire son
 premier token. Sans rien transmettre, Spring puis le navigateur considéreraient la connexion
 morte (délai de lecture). `avec_battements` consomme la source dans un thread et intercale `None`
 toutes les `intervalle_s` secondes de silence : l'orchestrateur le traduit en événement `attente`.
@@ -29,7 +29,7 @@ def avec_battements[T](source: Iterable[T], intervalle_s: float) -> Iterator[T |
         finally:
             fermer = getattr(iterateur, "close", None)
             if callable(fermer):
-                fermer()  # ferme la connexion HTTP sous-jacente (Ollama cesse de générer)
+                fermer()  # ferme la connexion HTTP sous-jacente (le fournisseur cesse de générer)
             file.put((_FIN, None))
 
     threading.Thread(target=consommer, name="copilote-llm", daemon=True).start()

@@ -4,12 +4,12 @@
 `sse.py`). Déroulé :
 1. persiste la question ;
 2. reconstruit le contexte (prompt système + N derniers messages) ;
-3. appelle Ollama avec le catalogue d'outils de l'utilisateur ; tant que le LLM demande des outils
+3. appelle le LLM avec le catalogue d'outils de l'utilisateur ; tant que le LLM demande des outils
    (dans la limite de `max_iterations_outils`), les exécute via Spring et relance le LLM ;
 4. streame les tokens de la réponse finale, puis persiste la réponse et ses sources.
 
-Pendant que le LLM lit son prompt (long sur CPU), un événement `attente` est émis toutes les
-`battement_s` secondes pour que Spring et le navigateur ne coupent pas la connexion.
+Tant que le LLM n'a rien produit (outils, file d'attente du fournisseur), un événement `attente`
+est émis toutes les `battement_s` secondes pour que Spring et le navigateur gardent la connexion.
 
 Si le client se déconnecte (bouton Stop → Spring ferme le flux), le générateur reçoit
 `GeneratorExit` : la réponse partielle est persistée avec le statut `interrompu`.
@@ -32,11 +32,11 @@ from logiflow_ai_service.agents.copilot.model import (
     Source,
     StatutMessage,
 )
-from logiflow_ai_service.agents.copilot.outils import BoiteOutils, ContexteAppel, en_outils_ollama
+from logiflow_ai_service.agents.copilot.outils import BoiteOutils, ContexteAppel, en_outils_llm
 from logiflow_ai_service.agents.copilot.prompts import PROMPT_TITRE, prompt_systeme
 from logiflow_ai_service.infrastructure.backend_client import ErreurOutil
-from logiflow_ai_service.infrastructure.exceptions import UpstreamServiceError
-from logiflow_ai_service.infrastructure.ollama_client import OllamaClient
+from logiflow_ai_service.infrastructure.exceptions import LlmQuotaError, UpstreamServiceError
+from logiflow_ai_service.infrastructure.llm_client import AppelOutilLlm, LlmClient
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class CopiloteOrchestrateur:
     def __init__(
         self,
         repository: ConversationRepository,
-        ollama: OllamaClient,
+        llm: LlmClient,
         outils: BoiteOutils,
         *,
         max_iterations_outils: int,
@@ -61,7 +61,7 @@ class CopiloteOrchestrateur:
     ) -> None:
         self._battement_s = battement_s
         self._repository = repository
-        self._ollama = ollama
+        self._llm = llm
         self._outils = outils
         self._max_iterations = max_iterations_outils
         self._historique_max = historique_max
@@ -80,7 +80,7 @@ class CopiloteOrchestrateur:
             role=Role.ASSISTANT,
             contenu="",
             statut=StatutMessage.EN_COURS,
-            modele=self._ollama.model,
+            modele=self._llm.model,
         )
         # Persistée dès maintenant : les appels d'outils y font référence (clé étrangère).
         self._repository.enregistrer_message(reponse)
@@ -93,6 +93,17 @@ class CopiloteOrchestrateur:
         except GeneratorExit:
             reponse.statut = StatutMessage.INTERROMPU
             raise
+        except LlmQuotaError as exc:
+            logger.warning("Quota LLM atteint : %s", exc)
+            reponse.statut = StatutMessage.ERREUR
+            yield (
+                "erreur",
+                {
+                    "code": "QUOTA_LLM",
+                    "message": "Quota du fournisseur IA atteint (palier gratuit). "
+                    "Réessayez dans une minute.",
+                },
+            )
         except UpstreamServiceError as exc:
             logger.warning("Réponse du copilote impossible : %s", exc)
             reponse.statut = StatutMessage.ERREUR
@@ -133,7 +144,7 @@ class CopiloteOrchestrateur:
     ) -> Iterator[Evenement]:
         catalogue = self._catalogue(contexte)
         libelles = {o["nom"]: o.get("libelle") or o["nom"] for o in catalogue}
-        outils_ollama = en_outils_ollama(catalogue)
+        outils_llm = en_outils_llm(catalogue)
 
         messages: list[dict[str, Any]] = [
             {
@@ -152,13 +163,12 @@ class CopiloteOrchestrateur:
         sources: dict[tuple[str, str], Source] = {}
 
         for iteration in range(self._max_iterations + 1):
-            # Au dernier tour, plus d'outils : on force le LLM à conclure avec ce qu'il a.
-            outils_du_tour = outils_ollama if iteration < self._max_iterations else None
+            # Au dernier tour, plus d'appel d'outil : on force le LLM à conclure avec ce qu'il a.
+            dernier_tour = iteration == self._max_iterations
             texte_du_tour = ""
-            appels: list[dict[str, Any]] = []
-            for fragment in avec_battements(
-                self._ollama.chat_stream(messages, outils_du_tour), self._battement_s
-            ):
+            appels: list[AppelOutilLlm] = []
+            flux = self._llm.chat_stream(messages, outils_llm or None, forcer_reponse=dernier_tour)
+            for fragment in avec_battements(flux, self._battement_s):
                 if fragment is None:
                     yield "attente", {}
                     continue
@@ -175,9 +185,25 @@ class CopiloteOrchestrateur:
             if not appels:
                 break
 
-            messages.append({"role": "assistant", "content": texte_du_tour, "tool_calls": appels})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": texte_du_tour or None,
+                    "tool_calls": [
+                        {
+                            "id": appel.id,
+                            "type": "function",
+                            "function": {
+                                "name": appel.nom,
+                                "arguments": json.dumps(appel.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for appel in appels
+                    ],
+                }
+            )
             for appel in appels:
-                nom, arguments = _nom_et_arguments(appel)
+                nom, arguments = appel.nom, appel.arguments
                 libelle = libelles.get(nom, nom)
                 yield "outil", {"nom": nom, "libelle": libelle, "statut": "debut"}
                 resultat = self._executer_outil(reponse, nom, arguments, libelles, contexte)
@@ -202,7 +228,7 @@ class CopiloteOrchestrateur:
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_name": nom,
+                        "tool_call_id": appel.id,
                         "content": json.dumps(resultat, ensure_ascii=False, default=str)[
                             :_LONGUEUR_MAX_RESULTAT_OUTIL
                         ],
@@ -262,7 +288,7 @@ class CopiloteOrchestrateur:
         titre = _titre_depuis_question(question)
         if self._titre_llm:
             try:
-                propose = self._ollama.chat(PROMPT_TITRE, question).strip().strip("\"'«» .")
+                propose = self._llm.chat(PROMPT_TITRE, question).strip().strip("\"'«» .")
                 if 0 < len(propose) <= 80:
                     titre = propose
             except UpstreamServiceError:
@@ -276,18 +302,6 @@ def _somme(a: int | None, b: int | None) -> int | None:
     if b is None:
         return a
     return (a or 0) + b
-
-
-def _nom_et_arguments(appel: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    fonction = appel.get("function") or {}
-    arguments = fonction.get("arguments") or {}
-    if isinstance(arguments, str):
-        # Certains modèles renvoient les arguments sérialisés en chaîne JSON.
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            arguments = {}
-    return str(fonction.get("name", "")), arguments if isinstance(arguments, dict) else {}
 
 
 def _titre_depuis_question(question: str) -> str:

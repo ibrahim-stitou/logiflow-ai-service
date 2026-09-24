@@ -11,7 +11,7 @@ from typing import Any
 
 from logiflow_ai_service.agents.copilot.model import ConnaissanceRepository
 from logiflow_ai_service.infrastructure.backend_client import BackendClient
-from logiflow_ai_service.infrastructure.ollama_client import OllamaClient
+from logiflow_ai_service.infrastructure.llm_client import LlmClient
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +50,11 @@ class BoiteOutils:
     def __init__(
         self,
         backend: BackendClient,
-        ollama: OllamaClient,
+        llm: LlmClient,
         connaissance: ConnaissanceRepository | None,
     ) -> None:
         self._backend = backend
-        self._ollama = ollama
+        self._llm = llm
         self._connaissance = connaissance
 
     def catalogue(self, contexte: ContexteAppel) -> list[dict[str, Any]]:
@@ -74,7 +74,7 @@ class BoiteOutils:
     def _rechercher_connaissance(self, question: str) -> dict[str, Any]:
         if not question.strip():
             return {"resultats": [], "total": 0, "sources": []}
-        [embedding] = self._ollama.embed([question])
+        [embedding] = self._llm.embed([question])
         fragments = self._connaissance.rechercher(embedding, limite=5)
         return {
             "resultats": [
@@ -86,8 +86,8 @@ class BoiteOutils:
         }
 
 
-def en_outils_ollama(catalogue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Format `tools` attendu par l'API /api/chat d'Ollama."""
+def en_outils_llm(catalogue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Format `tools` de l'API /chat/completions (compatible OpenAI)."""
     return [
         {
             "type": "function",

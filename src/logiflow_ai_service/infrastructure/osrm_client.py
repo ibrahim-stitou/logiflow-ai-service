@@ -1,7 +1,7 @@
 """Client HTTP vers un serveur OSRM (Open Source Routing Machine), utilisé par l'agent itinéraire.
 
 Pointe par défaut sur la démo publique `router.project-osrm.org` (gratuite, sans clé API) ; à
-remplacer par une instance auto-hébergée en production, cohérent avec Ollama — voir
+remplacer par une instance auto-hébergée en production, sans dépendance payante — voir
 docs/architecture.md.
 """
 

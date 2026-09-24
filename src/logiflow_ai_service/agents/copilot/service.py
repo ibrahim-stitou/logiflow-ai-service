@@ -22,17 +22,17 @@ from logiflow_ai_service.agents.copilot.orchestrateur import (
 from logiflow_ai_service.agents.copilot.outils import ContexteAppel
 from logiflow_ai_service.agents.copilot.prompts import PROMPT_QUESTION_UNIQUE
 from logiflow_ai_service.agents.copilot.schemas import CopilotAskRequest, CopilotAskResponse
-from logiflow_ai_service.infrastructure.ollama_client import OllamaClient
+from logiflow_ai_service.infrastructure.llm_client import LlmClient
 
 _CONFIANCE_PAR_DEFAUT = 0.5
 
 
 class CopiloteService:
-    def __init__(self, ollama_client: OllamaClient) -> None:
-        self._ollama_client = ollama_client
+    def __init__(self, llm_client: LlmClient) -> None:
+        self._llm_client = llm_client
 
     def repondre(self, request: CopilotAskRequest) -> CopilotAskResponse:
-        contenu = self._ollama_client.chat(PROMPT_QUESTION_UNIQUE, request.question)
+        contenu = self._llm_client.chat(PROMPT_QUESTION_UNIQUE, request.question)
         return CopilotAskResponse(
             reponse=contenu,
             sources=[],

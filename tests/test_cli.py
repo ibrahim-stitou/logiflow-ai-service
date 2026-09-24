@@ -32,13 +32,15 @@ def test_texte_depuis_html(tmp_path):
 def test_commande_ingerer(settings, repository, tmp_path):
     connaissance = ConnaissanceRepositoryMemoire()
     app = create_app(
-        settings, conversation_repository=repository, connaissance_repository=connaissance
+        settings.model_copy(update={"embed_model": "modele-embed"}),
+        conversation_repository=repository,
+        connaissance_repository=connaissance,
     )
     (tmp_path / "procedure.md").write_text("# Procédure ADR\n\nContenu.", encoding="utf-8")
 
     with respx.mock() as mock:
-        mock.post(f"{settings.ollama_base_url}/api/embed").mock(
-            return_value=httpx.Response(200, json={"embeddings": [[0.5] * 768]})
+        mock.post(f"{settings.llm_base_url}/embeddings").mock(
+            return_value=httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.5] * 8}]})
         )
         resultat = app.test_cli_runner().invoke(args=["ingerer", str(tmp_path)])
 
@@ -46,3 +48,13 @@ def test_commande_ingerer(settings, repository, tmp_path):
     [(titre, fragments)] = connaissance.documents.values()
     assert titre == "Procédure ADR"
     assert fragments[0][0].startswith("# Procédure ADR")
+
+
+def test_ingerer_sans_modele_d_embeddings_est_refuse(settings, repository, tmp_path):
+    app = create_app(settings, conversation_repository=repository)
+    (tmp_path / "a.md").write_text("# A", encoding="utf-8")
+
+    resultat = app.test_cli_runner().invoke(args=["ingerer", str(tmp_path)])
+
+    assert resultat.exit_code != 0
+    assert "EMBED_MODEL" in resultat.output
