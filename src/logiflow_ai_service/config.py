@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     backend_base_url: str = "http://localhost:8080"
     # Secret distinct d'internal_api_key : identifie le service IA auprès de Spring.
     backend_callback_api_key: str = "local-dev-callback-key"
-    backend_timeout_s: float = 15.0
+    # 60 s : l'outil proposer_voyages enchaîne l'agent de planification (OSRM + LLM).
+    backend_timeout_s: float = 60.0
 
     # --- Copilote ---
     copilote_max_iterations_outils: int = 4

@@ -2,8 +2,8 @@
 
 ## Rôle du service
 
-`logiflow-ai-service` héberge les agents IA du TMS LogiFlow (copilote conversationnel, groupage,
-maintenance prédictive, itinéraire). Il n'est **jamais appelé par le frontend Angular** : seul le
+`logiflow-ai-service` héberge les agents IA du TMS LogiFlow (copilote conversationnel,
+planification de voyage, maintenance prédictive, itinéraire). Il n'est **jamais appelé par le frontend Angular** : seul le
 backend Spring Boot (`logiflow-backend`) le consomme, en interne, via un secret partagé
 (`X-Internal-Api-Key`). Voir `docs/integration-ia.md` dans `logiflow-backend` pour le contrat
 complet côté appelant.
@@ -47,7 +47,7 @@ src/logiflow_ai_service/
 
   api/v1/                    couche HTTP : un blueprint par agent, ne contient aucune logique
     copilot.py                métier — parse la requête, appelle le service, formate la réponse
-    groupage.py
+    planification.py
     maintenance.py
     itinerary.py
 
@@ -60,6 +60,13 @@ src/logiflow_ai_service/
     orchestrateur.py            historique + LLM + boucle d'outils, en événements SSE
     outils.py                   catalogue (Spring + outils locaux) et exécution
     prompts.py, sse.py
+
+  agents/planification/       agent de planification de voyage
+    matrice.py                  distances/durées : OSRM /table, repli Haversine
+    horaires.py                 ETA/ETD, service, pauses 45 min / 4 h 30, équipage requis
+    solveur.py                  compatibilité, ordre des arrêts, groupes, ressources, options
+    redaction.py                justifications et comparaison (LLM, repli par gabarit)
+    service.py                  orchestration et mise en forme de la réponse
 
   cli.py                      `flask ingerer` : base de connaissance
 
@@ -85,13 +92,14 @@ Chaque route API :
 |---|---|---|---|
 | Copilote (chatbot) | `/internal/ai/v1/copilot/conversations/**` | LLM cloud, PostgreSQL, outils Spring | Sans outils (Spring injoignable) : répond sans données métier ; LLM injoignable ou quota atteint : événement `erreur` |
 | Copilote (question unique) | `POST /internal/ai/v1/copilot/ask` | LLM cloud | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
-| Groupage | `POST /internal/ai/v1/groupage/analyser` | Aucune (heuristique locale) | N/A |
+| Planification de voyage | `POST /internal/ai/v1/planification/proposer` | OSRM, LLM cloud | OSRM : distances Haversine × 1,3 ; LLM : justifications par gabarit — l'agent répond toujours |
 | Maintenance | `POST /internal/ai/v1/maintenance/recommander` | — | Non implémenté (501) |
 | Itinéraire | `POST /internal/ai/v1/itinerary/calculer` | OSRM | Aucun (503) — une distance routière estimée sans moteur de routing serait trompeuse |
 
-Le groupage n'appelle aucun service externe : c'est une heuristique de remplissage de capacité
-(poids/volume/ADR), documentée dans `agents/groupage/service.py`, en attendant que le contrat
-transmette les coordonnées des sites de chargement/déchargement.
+La planification de voyage remplace l'ancien agent de groupage (ADR 0005 de `logiflow-backend`).
+Le calcul est **déterministe** (solveur) ; le LLM ne fait que commenter les options déjà
+calculées et désigner celle qu'il recommande parmi elles. Spring revalide ensuite chaque option
+avec les règles de création de voyage.
 
 ## Déploiement cible
 

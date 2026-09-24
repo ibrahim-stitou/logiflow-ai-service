@@ -1,7 +1,7 @@
 # LogiFlow AI Service
 
-Service Flask hébergeant les agents IA du TMS **LogiFlow** : copilote conversationnel, groupage,
-maintenance prédictive (à venir) et calcul d'itinéraire. Appelé exclusivement en interne par le
+Service Flask hébergeant les agents IA du TMS **LogiFlow** : copilote conversationnel,
+planification de voyage, maintenance prédictive (à venir) et calcul d'itinéraire. Appelé exclusivement en interne par le
 backend Spring Boot (`logiflow-backend`) — jamais exposé au frontend Angular.
 
 Voir [docs/architecture.md](docs/architecture.md) pour le détail de l'architecture et
@@ -79,7 +79,7 @@ Tous préfixés `/internal/ai/v1`, protégés par l'en-tête `X-Internal-Api-Key
   `POST /internal/ai/v1/copilot/conversations/<id>/messages` (réponse `text/event-stream`),
   `POST /internal/ai/v1/copilot/messages/<id>/feedback` — utilisateur dans `X-Utilisateur-Id`
 - `POST /internal/ai/v1/copilot/ask` (question unique, ancienne version)
-- `POST /internal/ai/v1/groupage/analyser`
+- `POST /internal/ai/v1/planification/proposer` (propositions de voyages comparées)
 - `POST /internal/ai/v1/maintenance/recommander` (501 — non implémenté)
 - `POST /internal/ai/v1/itinerary/calculer`
 
