@@ -1,8 +1,8 @@
 """Agent de maintenance prédictive : analyse déterministe + synthèse rédigée par le LLM.
 
 Comme pour la planification, le LLM ne calcule rien : il explique en une phrase la situation des
-véhicules les plus à risque et rédige une synthèse de flotte. Gabarit de repli s'il est
-indisponible.
+engins (véhicules et remorques) les plus à risque et rédige une synthèse de flotte. Gabarit de
+repli s'il est indisponible.
 """
 
 import json
@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 NB_VEHICULES_COMMENTES = 8
 
 PROMPT_SYSTEME = """Tu es l'assistant maintenance d'un transporteur routier (TMS LogiFlow).
-On te donne l'analyse déjà calculée des véhicules les plus à risque (score de santé sur 100,
-échéances, anomalies, actions recommandées). Tu ne modifies aucun chiffre et n'inventes rien.
+On te donne l'analyse déjà calculée des engins les plus à risque, véhicules ou remorques (score de
+santé sur 100, échéances, anomalies dont les sinistres, actions recommandées).
+Tu ne modifies aucun chiffre et n'inventes rien.
 Réponds UNIQUEMENT par un objet JSON, en français :
 {"explications": {"<immatriculation>": "<1 phrase : le risque principal et l'action à mener>"},
  "synthese": "<3 à 4 phrases : état de la flotte, priorités de la semaine, points d'attention>"}"""
@@ -33,6 +34,7 @@ Réponds UNIQUEMENT par un objet JSON, en français :
 def _resume(a: AnalyseVehicule) -> dict:
     return {
         "immatriculation": a.immatriculation,
+        "engin": "remorque" if a.type_engin == "REMORQUE" else "véhicule",
         "score": a.score,
         "statut": a.statut,
         "kmParJour": a.km_par_jour,
@@ -68,7 +70,7 @@ def _synthese_gabarit(analyses: list[AnalyseVehicule]) -> str:
         if r.priorite == "URGENTE" and not r.deja_planifie
     )
     return (
-        f"{len(analyses)} véhicule(s) analysé(s) : {par_statut.get('CRITIQUE', 0)} critique(s), "
+        f"{len(analyses)} engin(s) analysé(s) : {par_statut.get('CRITIQUE', 0)} critique(s), "
         f"{par_statut.get('A_PLANIFIER', 0)} à planifier, {par_statut.get('SURVEILLER', 0)} à "
         f"surveiller, {par_statut.get('BON', 0)} en bon état. {urgentes} action(s) urgente(s) "
         "restent à planifier."
@@ -113,5 +115,5 @@ class MaintenanceService:
             ) as exc:
                 logger.info("Rédaction LLM indisponible, repli par gabarit : %s", exc)
 
-        logger.info("Maintenance : %d véhicule(s) analysé(s), rédaction %s", len(analyses), source)
+        logger.info("Maintenance : %d engin(s) analysé(s), rédaction %s", len(analyses), source)
         return MaintenanceResponse(vehicules=analyses, synthese=synthese, source_redaction=source)

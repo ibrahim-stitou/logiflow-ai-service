@@ -1,11 +1,15 @@
-"""Analyse déterministe de l'état d'un véhicule : usage, échéances, anomalies, score, actions.
+"""Analyse déterministe de l'état d'un engin : usage, échéances, anomalies, score, actions.
 
 Hypothèses (données disponibles dans le TMS) :
-- l'usage réel est estimé par les kilomètres des voyages réalisés sur 90 jours ; sans activité,
-  on retombe sur le kilométrage moyen depuis la mise en circulation (plafonné) ;
-- les ordres de travail ne portent pas de kilométrage : la date du dernier entretien préventif
-  terminé sert d'origine, et à défaut la position dans le cycle (kilométrage modulo périodicité) ;
-- une échéance est avancée si les voyages déjà planifiés consomment les kilomètres restants.
+- l'usage réel est estimé par les kilomètres des voyages réalisés sur 90 jours (véhicule ou
+  remorque attelée) ; sans activité, on retombe sur le kilométrage moyen depuis la mise en
+  circulation (plafonné) ;
+- l'échéance d'un plan vient du module maintenance (dernière réalisation relevée à la clôture
+  des OT) : l'agent la projette dans le temps avec l'usage réel. Sans elle (ancien contrat), la
+  date du dernier entretien préventif terminé sert d'origine, à défaut le kilométrage modulo la
+  périodicité ;
+- une échéance est avancée si les voyages déjà planifiés consomment les kilomètres restants ;
+- les sinistres des 12 derniers mois pèsent sur le score (sinistralité, engin immobilisé).
 """
 
 from dataclasses import dataclass
@@ -16,6 +20,7 @@ from logiflow_ai_service.agents.maintenance.schemas import (
     AnalyseVehicule,
     Echeance,
     MaintenanceRequest,
+    Plan,
     Recommandation,
     VehiculeAAnalyser,
 )
@@ -35,7 +40,9 @@ DOCUMENTS_REGLEMENTAIRES = {
     "CARTE_GRISE": "Carte grise",
     "ADR": "Agrément ADR",
 }
-STATUTS_ACTIFS = {"PLANIFIE", "EN_COURS"}
+STATUTS_ACTIFS = {"PLANIFIE", "EN_COURS", "EN_ATTENTE_PIECES"}
+STATUTS_SINISTRE_CLOS = {"CLOS", "CLASSE_SANS_SUITE"}
+TYPES_REPARATION = {"REPARATION", "CARROSSERIE"}
 HEURE_ATELIER = time(7, 0)
 
 PENALITE_ECHUE = 45
@@ -45,6 +52,9 @@ PENALITE_DOCUMENT_EXPIRE = 30
 PENALITE_DOCUMENT_PROCHE = 10
 PENALITE_REPARATIONS = 15
 PENALITE_SURCONSOMMATION = 10
+PENALITE_SINISTRALITE = 10
+PENALITE_IMMOBILISE_SINISTRE = 15
+SEUIL_SINISTRES = 2
 SCORE_MAX_DOCUMENT_EXPIRE = 39.0
 
 
@@ -53,6 +63,8 @@ class _Echeance:
     echeance: Echeance
     plan_duree_min: int
     deja_planifie: bool
+    type_intervention: str = "ENTRETIEN_PREVENTIF"
+    echu_selon_spring: bool = False
 
 
 def km_par_jour(v: VehiculeAAnalyser, aujourd_hui: date) -> float:
@@ -79,33 +91,52 @@ def _dernier(v: VehiculeAAnalyser, type_ot: str, statut: str) -> date | None:
     return max(dates, default=None)
 
 
-def _deja_planifie(v: VehiculeAAnalyser, type_ot: str, aujourd_hui: date) -> bool:
+def _deja_planifie(
+    v: VehiculeAAnalyser, type_ot: str, aujourd_hui: date, plan_id: str | None = None
+) -> bool:
+    """Un OT ouvert couvre déjà le besoin : rattaché au plan, sinon du même type et récent."""
+    ouverts = [o for o in v.ordres if o.statut in STATUTS_ACTIFS]
+    if plan_id is not None and any(o.plan_id == plan_id for o in ouverts):
+        return True
     return any(
         o.type == type_ot
-        and o.statut in STATUTS_ACTIFS
         and (o.date_planifiee is None or o.date_planifiee.date() >= aujourd_hui - timedelta(days=7))
-        for o in v.ordres
+        for o in ouverts
     )
+
+
+def _nom_engin(v: VehiculeAAnalyser) -> str:
+    return "la remorque" if v.type_engin == "REMORQUE" else "le véhicule"
 
 
 def _km_planifies_avant(v: VehiculeAAnalyser, limite: date) -> float:
     return sum(p.distance_km for p in v.voyages_planifies if p.depart.date() <= limite)
 
 
+def _km_restant_estime(
+    v: VehiculeAAnalyser, plan: Plan, usage: float, aujourd_hui: date
+) -> int | None:
+    """Kilomètres avant échéance quand Spring ne les fournit pas (ancien contrat)."""
+    if not plan.periodicite_km:
+        return None
+    origine = plan.derniere_date or _dernier(v, plan.type, "TERMINE")
+    if plan.derniere_km is not None:
+        km_depuis = v.kilometrage - plan.derniere_km
+    elif origine:
+        km_depuis = usage * (aujourd_hui - origine).days
+    else:
+        km_depuis = v.kilometrage % plan.periodicite_km
+    return round(plan.periodicite_km - km_depuis)
+
+
 def echeances_plans(v: VehiculeAAnalyser, aujourd_hui: date, horizon: int) -> list[_Echeance]:
     usage = km_par_jour(v, aujourd_hui)
-    dernier_preventif = _dernier(v, "ENTRETIEN_PREVENTIF", "TERMINE")
-    deja = _deja_planifie(v, "ENTRETIEN_PREVENTIF", aujourd_hui)
     resultat = []
     for plan in v.plans:
-        km_restant = None
+        calcule = plan.etat is not None
+        km_restant = plan.km_restant if calcule else _km_restant_estime(v, plan, usage, aujourd_hui)
         dates: list[date] = []
-        if plan.periodicite_km:
-            if dernier_preventif:
-                km_depuis = usage * (aujourd_hui - dernier_preventif).days
-            else:
-                km_depuis = v.kilometrage % plan.periodicite_km
-            km_restant = round(plan.periodicite_km - km_depuis)
+        if km_restant is not None:
             date_km = aujourd_hui + timedelta(days=max(km_restant, 0) / max(usage, 1))
             # Les voyages déjà planifiés peuvent consommer le reste avant cette date.
             if _km_planifies_avant(v, date_km) >= km_restant > 0:
@@ -119,13 +150,21 @@ def echeances_plans(v: VehiculeAAnalyser, aujourd_hui: date, horizon: int) -> li
                 )
                 date_km = min(date_km, premier)
             dates.append(date_km)
-        if plan.periodicite_mois and dernier_preventif:
-            dates.append(
-                dernier_preventif + timedelta(days=round(plan.periodicite_mois * JOURS_PAR_MOIS))
-            )
+        if calcule and plan.date_echeance:
+            dates.append(plan.date_echeance)
+        elif plan.periodicite_mois:
+            origine = plan.derniere_date or _dernier(v, plan.type, "TERMINE")
+            if origine:
+                dates.append(
+                    origine + timedelta(days=round(plan.periodicite_mois * JOURS_PAR_MOIS))
+                )
         date_echeance = min(dates, default=None)
-        en_alerte = (km_restant is not None and km_restant <= plan.seuil_alerte_km) or (
-            date_echeance is not None and date_echeance <= aujourd_hui + timedelta(days=horizon)
+        en_alerte = (
+            plan.etat in {"ALERTE", "ECHU"}
+            or (km_restant is not None and km_restant <= plan.seuil_alerte_km)
+            or (
+                date_echeance is not None and date_echeance <= aujourd_hui + timedelta(days=horizon)
+            )
         )
         resultat.append(
             _Echeance(
@@ -136,7 +175,9 @@ def echeances_plans(v: VehiculeAAnalyser, aujourd_hui: date, horizon: int) -> li
                     en_alerte=en_alerte,
                 ),
                 plan.duree_estimee_min or DUREE_INTERVENTION_DEFAUT_MIN,
-                deja,
+                _deja_planifie(v, plan.type, aujourd_hui, plan.id),
+                plan.type,
+                plan.etat == "ECHU",
             )
         )
     return resultat
@@ -206,8 +247,10 @@ def analyser_vehicule(
     echeances = echeances_plans(v, aujourd_hui, horizon)
     for e in echeances:
         ech = e.echeance
-        echue = (ech.km_restant is not None and ech.km_restant <= 0) or (
-            ech.date_echeance is not None and ech.date_echeance <= aujourd_hui
+        echue = (
+            e.echu_selon_spring
+            or (ech.km_restant is not None and ech.km_restant <= 0)
+            or (ech.date_echeance is not None and ech.date_echeance <= aujourd_hui)
         )
         if echue:
             penalites += PENALITE_ECHUE
@@ -223,7 +266,7 @@ def analyser_vehicule(
             detail.append(f"échéance projetée le {ech.date_echeance.strftime('%d/%m/%Y')}")
         recommandations.append(
             Recommandation(
-                type="ENTRETIEN_PREVENTIF",
+                type=e.type_intervention,
                 libelle=f"{ech.libelle} à réaliser",
                 priorite=_priorite(ech.date_echeance, aujourd_hui, echue),
                 avant_le=ech.date_echeance,
@@ -264,7 +307,7 @@ def analyser_vehicule(
                 duree_min=120 if creneau else 0,
                 justification=(
                     f"Expire le {doc.date_expiration.strftime('%d/%m/%Y')} : "
-                    "le véhicule ne peut pas être affecté à un voyage au-delà."
+                    f"{_nom_engin(v)} ne peut pas être affecté(e) à un voyage au-delà."
                 ),
                 deja_planifie=type_ot == "CONTROLE_TECHNIQUE"
                 and _deja_planifie(v, "CONTROLE_TECHNIQUE", aujourd_hui),
@@ -276,6 +319,7 @@ def analyser_vehicule(
         o
         for o in v.ordres
         if o.type == "REPARATION"
+        and o.origine != "SINISTRE"
         and o.statut != "ANNULE"
         and o.date_planifiee
         and o.date_planifiee.date() >= limite_reparations
@@ -315,8 +359,16 @@ def analyser_vehicule(
             )
         )
 
+    penalites += _analyser_sinistres(v, requete, aujourd_hui, anomalies, recommandations)
+
+    for o in v.ordres:
+        if o.statut == "EN_ATTENTE_PIECES":
+            anomalies.append(f"Ordre de travail {o.reference or o.type} en attente de pièces")
+
     if v.statut in {"EN_MAINTENANCE", "IMMOBILISE"}:
-        anomalies.append(f"Véhicule actuellement {v.statut.lower().replace('_', ' ')}")
+        anomalies.append(
+            f"{_nom_engin(v).capitalize()} actuellement {v.statut.lower().replace('_', ' ')}"
+        )
 
     kms = [e.echeance.km_restant for e in echeances if e.echeance.km_restant is not None]
     dates = [e.echeance.date_echeance for e in echeances if e.echeance.date_echeance]
@@ -329,6 +381,7 @@ def analyser_vehicule(
     recommandations.sort(key=lambda r: (r.deja_planifie, ordre[r.priorite], r.avant_le or date.max))
     return AnalyseVehicule(
         vehicule_id=v.id,
+        type_engin=v.type_engin,
         immatriculation=v.immatriculation,
         score=score,
         statut=statut_depuis_score(score, km_avant, document_expire),
@@ -342,9 +395,62 @@ def analyser_vehicule(
     )
 
 
+def _analyser_sinistres(
+    v: VehiculeAAnalyser,
+    requete: MaintenanceRequest,
+    aujourd_hui: date,
+    anomalies: list[str],
+    recommandations: list[Recommandation],
+) -> int:
+    """Sinistralité sur 12 mois et sinistres immobilisants sans réparation planifiée."""
+    penalites = 0
+    retenus = [
+        s
+        for s in v.sinistres
+        if s.statut != "CLASSE_SANS_SUITE"
+        and s.date_survenance >= aujourd_hui - timedelta(days=365)
+    ]
+    if len(retenus) >= SEUIL_SINISTRES:
+        penalites += PENALITE_SINISTRALITE
+        responsables = sum(1 for s in retenus if s.responsabilite == "RESPONSABLE")
+        cout = sum((s.cout_net or 0) for s in retenus)
+        texte = f"{len(retenus)} sinistres en 12 mois (coût net {round(cout)} €)"
+        if responsables:
+            texte += f", dont {responsables} en tort"
+        anomalies.append(texte)
+
+    reparation_ouverte = any(
+        o.origine == "SINISTRE" and o.statut in STATUTS_ACTIFS for o in v.ordres
+    )
+    for s in retenus:
+        if s.statut in STATUTS_SINISTRE_CLOS or not s.engin_immobilise:
+            continue
+        penalites += PENALITE_IMMOBILISE_SINISTRE
+        anomalies.append(f"Immobilisé suite au sinistre {s.reference}")
+        creneau = creneau_libre(v, requete.date_reference, None, 240)
+        recommandations.append(
+            Recommandation(
+                type="CARROSSERIE" if s.type == "BRIS_DE_GLACE" else "REPARATION",
+                libelle=f"Réparation suite au sinistre {s.reference}",
+                priorite="HAUTE",
+                creneau_debut=creneau[0] if creneau else None,
+                creneau_fin=creneau[1] if creneau else None,
+                duree_min=240,
+                justification=(
+                    f"{_nom_engin(v).capitalize()} est indisponible tant que la réparation "
+                    "n'est pas faite."
+                ),
+                deja_planifie=reparation_ouverte,
+            )
+        )
+    return penalites
+
+
 def medianes_consommation(requete: MaintenanceRequest) -> dict[str, float]:
     par_type: dict[str, list[float]] = {}
     for v in requete.vehicules:
+        if v.type_engin != "VEHICULE":
+            continue
         conso = consommation_l100(v)
         if conso is not None:
             par_type.setdefault(v.type, []).append(conso)

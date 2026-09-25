@@ -1,11 +1,13 @@
 """Contrat POST /internal/ai/v1/maintenance/recommander (voir docs/integration-ia.md côté backend).
 
-Spring envoie l'état de chaque véhicule (compteurs, plans d'entretien, ordres de travail,
-documents, activité réalisée et voyages planifiés) ; l'agent renvoie un score de santé, les
+Spring envoie l'état de chaque engin, véhicule ou remorque : compteurs, plans d'entretien avec
+leur échéance calculée par le module maintenance, ordres de travail, documents, sinistres des
+12 derniers mois, activité réalisée et voyages planifiés. L'agent renvoie un score de santé, les
 échéances projetées, les anomalies et des recommandations priorisées avec un créneau libre.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import Field
 
@@ -15,16 +17,41 @@ from logiflow_ai_service.schemas import CamelModel
 class Plan(CamelModel):
     id: str
     libelle: str
+    type: str = "ENTRETIEN_PREVENTIF"
     periodicite_km: int | None = None
     periodicite_mois: int | None = None
+    periodicite_heures: int | None = None
     seuil_alerte_km: int = 0
     duree_estimee_min: int = 0
+    # Dernière réalisation et échéance calculées par Spring (absentes : estimation par l'agent).
+    derniere_date: date | None = None
+    derniere_km: int | None = None
+    km_restant: int | None = None
+    date_echeance: date | None = None
+    etat: str | None = None
 
 
 class Ordre(CamelModel):
+    reference: str | None = None
     type: str
+    nature: str | None = None
     statut: str
+    origine: str | None = None
+    plan_id: str | None = None
     date_planifiee: datetime | None = None
+    immobilisation: bool = False
+    cout_ttc: Decimal | None = None
+
+
+class Sinistre(CamelModel):
+    reference: str
+    date_survenance: date
+    type: str
+    gravite: str
+    responsabilite: str = "A_DETERMINER"
+    statut: str
+    engin_immobilise: bool = False
+    cout_net: Decimal | None = None
 
 
 class Document(CamelModel):
@@ -40,7 +67,11 @@ class VoyagePlanifie(CamelModel):
 
 
 class VehiculeAAnalyser(CamelModel):
+    """Engin à analyser : pour une remorque, `type` est la carrosserie et `heures_moteur` les
+    heures du groupe froid."""
+
     id: str
+    type_engin: str = "VEHICULE"
     immatriculation: str
     type: str
     statut: str
@@ -53,6 +84,7 @@ class VehiculeAAnalyser(CamelModel):
     plans: list[Plan] = Field(default_factory=list)
     ordres: list[Ordre] = Field(default_factory=list)
     documents: list[Document] = Field(default_factory=list)
+    sinistres: list[Sinistre] = Field(default_factory=list)
     voyages_planifies: list[VoyagePlanifie] = Field(default_factory=list)
 
 
@@ -84,6 +116,7 @@ class Recommandation(CamelModel):
 
 class AnalyseVehicule(CamelModel):
     vehicule_id: str
+    type_engin: str = "VEHICULE"
     immatriculation: str
     score: float
     statut: str

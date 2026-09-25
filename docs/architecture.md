@@ -93,13 +93,22 @@ Chaque route API :
 | Copilote (chatbot) | `/internal/ai/v1/copilot/conversations/**` | LLM cloud, PostgreSQL, outils Spring | Sans outils (Spring injoignable) : répond sans données métier ; LLM injoignable ou quota atteint : événement `erreur` |
 | Copilote (question unique) | `POST /internal/ai/v1/copilot/ask` | LLM cloud | Aucun (503) — pas de réponse pertinente sans LLM pour une question ouverte |
 | Planification de voyage | `POST /internal/ai/v1/planification/proposer` | OSRM, LLM cloud | OSRM : distances Haversine × 1,3 ; LLM : justifications par gabarit — l'agent répond toujours |
-| Maintenance | `POST /internal/ai/v1/maintenance/recommander` | — | Non implémenté (501) |
+| Maintenance prédictive | `POST /internal/ai/v1/maintenance/recommander` | LLM cloud | Explications et synthèse par gabarit — l'analyse (déterministe) est toujours renvoyée |
 | Itinéraire | `POST /internal/ai/v1/itinerary/calculer` | OSRM | Aucun (503) — une distance routière estimée sans moteur de routing serait trompeuse |
 
 La planification de voyage remplace l'ancien agent de groupage (ADR 0005 de `logiflow-backend`).
 Le calcul est **déterministe** (solveur) ; le LLM ne fait que commenter les options déjà
 calculées et désigner celle qu'il recommande parmi elles. Spring revalide ensuite chaque option
 avec les règles de création de voyage.
+
+La maintenance prédictive suit le même principe. Spring envoie chaque engin (véhicules et
+remorques) avec ses plans d'entretien, dont l'échéance est déjà calculée par le module
+maintenance, ses ordres de travail, documents, sinistres des 12 derniers mois et voyages. L'agent
+(`agents/maintenance/analyse.py`) projette les échéances avec l'usage réel et les voyages
+planifiés, détecte les anomalies (documents expirés, réparations répétées, sinistralité, engin
+immobilisé par un sinistre, surconsommation), calcule un score de santé et propose des
+interventions sur un créneau libre entre deux voyages. Le LLM ne rédige que les explications et
+la synthèse.
 
 ## Déploiement cible
 

@@ -159,7 +159,7 @@ def test_route_recommander_avec_repli_gabarit(client, auth_headers):
     assert vehicule["statut"] in {"A_PLANIFIER", "CRITIQUE", "SURVEILLER"}
     assert vehicule["recommandations"][0]["type"] == "ENTRETIEN_PREVENTIF"
     assert vehicule["explication"].startswith("Score")
-    assert "véhicule(s) analysé(s)" in body["synthese"]
+    assert "engin(s) analysé(s)" in body["synthese"]
 
 
 def test_route_recommander_avec_llm(client, auth_headers):
@@ -185,3 +185,118 @@ def test_route_recommander_avec_llm(client, auth_headers):
 def test_route_recommander_corps_invalide(client, auth_headers):
     response = client.post("/internal/ai/v1/maintenance/recommander", json={}, headers=auth_headers)
     assert response.status_code == 400
+
+
+def _plan_calcule(**extra):
+    """Plan dont Spring fournit la dernière réalisation et l'échéance."""
+    return {
+        "id": "p9",
+        "libelle": "Contrôle groupe froid",
+        "type": "GROUPE_FROID",
+        "periodiciteKm": 60_000,
+        "seuilAlerteKm": 3_000,
+        "dureeEstimeeMin": 180,
+        "derniereKm": 90_000,
+        **extra,
+    }
+
+
+def test_l_echeance_calculee_par_spring_prime_sur_l_estimation():
+    v = VehiculeAAnalyser.model_validate(
+        _vehicule(
+            plans=[_plan_calcule(kmRestant=-500, dateEcheance="2026-09-20", etat="ECHU")],
+            # Un ancien préventif terminé ne doit plus servir d'origine.
+            ordres=[_ot("ENTRETIEN_PREVENTIF", "TERMINE", -10)],
+        )
+    )
+    (analyse,) = analyser(_requete(v.model_dump(by_alias=True)))
+
+    recommandation = analyse.recommandations[0]
+    assert analyse.km_avant_echeance == -500
+    assert recommandation.type == "GROUPE_FROID"
+    assert recommandation.priorite == "URGENTE"
+    assert recommandation.creneau_debut is not None
+    assert analyse.statut == "CRITIQUE"
+
+
+def test_un_ot_rattache_au_plan_marque_l_echeance_deja_planifiee():
+    ot = {**_ot("GROUPE_FROID", "PLANIFIE", -30), "planId": "p9"}
+    v = VehiculeAAnalyser.model_validate(
+        _vehicule(plans=[_plan_calcule(kmRestant=1_000, etat="ALERTE")], ordres=[ot])
+    )
+    (echeance,) = echeances_plans(v, T0.date(), 30)
+
+    assert echeance.deja_planifie
+    assert echeance.echeance.en_alerte
+
+
+def test_sinistralite_et_engin_immobilise_par_un_sinistre():
+    sinistres = [
+        {
+            "reference": "SIN-2026-000001",
+            "dateSurvenance": "2026-03-02",
+            "type": "ACCROCHAGE",
+            "gravite": "MATERIEL_LEGER",
+            "responsabilite": "RESPONSABLE",
+            "statut": "CLOS",
+            "coutNet": 1200,
+        },
+        {
+            "reference": "SIN-2026-000002",
+            "dateSurvenance": "2026-09-18",
+            "type": "BRIS_DE_GLACE",
+            "gravite": "MATERIEL_LEGER",
+            "statut": "EN_EXPERTISE",
+            "enginImmobilise": True,
+            "coutNet": 300,
+        },
+    ]
+    sans = analyser(_requete(_vehicule(plans=[])))[0]
+    (analyse,) = analyser(_requete(_vehicule(plans=[], sinistres=sinistres)))
+
+    assert analyse.score == sans.score - 25
+    assert any(
+        "2 sinistres en 12 mois (coût net 1500 €), dont 1 en tort" in a for a in analyse.anomalies
+    )
+    assert any("SIN-2026-000002" in a for a in analyse.anomalies)
+    reparation = next(r for r in analyse.recommandations if "SIN-2026-000002" in r.libelle)
+    assert reparation.type == "CARROSSERIE"
+    assert reparation.priorite == "HAUTE"
+    assert not reparation.deja_planifie
+
+    ot = {**_ot("CARROSSERIE", "EN_COURS", -1), "origine": "SINISTRE"}
+    (suivie,) = analyser(_requete(_vehicule(plans=[], sinistres=sinistres, ordres=[ot])))
+    assert next(r for r in suivie.recommandations if "SIN-2026-000002" in r.libelle).deja_planifie
+
+
+def test_une_remorque_est_analysee_sans_consommation():
+    remorque = _vehicule(
+        "r1",
+        typeEngin="REMORQUE",
+        type="FRIGORIFIQUE",
+        litresConsommes=0,
+        documents=[{"type": "CONTROLE_TECHNIQUE", "dateExpiration": "2026-09-01"}],
+    )
+    analyses = analyser(_requete(remorque, _vehicule("v2"), _vehicule("v3"), _vehicule("v4")))
+    analyse = next(a for a in analyses if a.vehicule_id == "r1")
+
+    assert analyse.type_engin == "REMORQUE"
+    assert analyse.consommation_l100 is None
+    ct = next(r for r in analyse.recommandations if r.type == "CONTROLE_TECHNIQUE")
+    assert "la remorque ne peut pas être affecté(e)" in ct.justification
+
+
+def test_route_recommander_renvoie_le_type_d_engin(client, auth_headers):
+    corps = {
+        "dateReference": T0.isoformat(),
+        "horizonJours": 30,
+        "vehicules": [_vehicule("r1", typeEngin="REMORQUE", plans=[_plan_calcule(etat="OK")])],
+    }
+    with respx.mock:
+        respx.post(CHAT).mock(return_value=httpx.Response(500))
+        reponse = client.post(
+            "/internal/ai/v1/maintenance/recommander", json=corps, headers=auth_headers
+        )
+
+    assert reponse.status_code == 200
+    assert reponse.get_json()["vehicules"][0]["typeEngin"] == "REMORQUE"
