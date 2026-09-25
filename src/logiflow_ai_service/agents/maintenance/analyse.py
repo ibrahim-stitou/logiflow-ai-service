@@ -24,6 +24,7 @@ from logiflow_ai_service.agents.maintenance.schemas import (
     Recommandation,
     VehiculeAAnalyser,
 )
+from logiflow_ai_service.devise import DEVISE
 
 JOURS_ACTIVITE = 90
 KM_PAR_JOUR_DEFAUT = 250.0
@@ -413,7 +414,7 @@ def _analyser_sinistres(
         penalites += PENALITE_SINISTRALITE
         responsables = sum(1 for s in retenus if s.responsabilite == "RESPONSABLE")
         cout = sum((s.cout_net or 0) for s in retenus)
-        texte = f"{len(retenus)} sinistres en 12 mois (coût net {round(cout)} €)"
+        texte = f"{len(retenus)} sinistres en 12 mois (coût net {round(cout)} {DEVISE})"
         if responsables:
             texte += f", dont {responsables} en tort"
         anomalies.append(texte)

@@ -30,8 +30,9 @@ from logiflow_ai_service.agents.planification.schemas import (
 
 TAILLE_MAX_GROUPE = 8
 ECART_TEMPERATURE_MAX = 2.0
-COUT_KM = 1.15
-COUT_HEURE_CHAUFFEUR = 32.0
+# Barème de coût de revient, en devise de l'application (MAD).
+COUT_KM = 11.5
+COUT_HEURE_CHAUFFEUR = 320.0
 PERMIS_PAR_TYPE = {"TRACTEUR": "CE", "PORTEUR": "C", "FOURGON": "B"}
 # Catégories couvertes par chaque catégorie de permis (C couvre C1, CE couvre C, etc.).
 COUVERTURE_PERMIS = {

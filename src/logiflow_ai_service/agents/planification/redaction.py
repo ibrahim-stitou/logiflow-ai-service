@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 
 from logiflow_ai_service.agents.planification.schemas import OptionVoyage
+from logiflow_ai_service.devise import DEVISE
 from logiflow_ai_service.infrastructure.exceptions import LlmQuotaError, UpstreamServiceError
 from logiflow_ai_service.infrastructure.llm_client import LlmClient
 
@@ -76,7 +77,8 @@ def gabarit(options: list[OptionVoyage]) -> Redaction:
     )
     lignes = [
         f"Option {o.rang} ({o.libelle_objectif.lower()}) : {o.indicateurs.nb_dossiers} dossier(s), "
-        f"{round(o.indicateurs.distance_km)} km, {round(o.indicateurs.cout_estime)} € estimés"
+        f"{round(o.indicateurs.distance_km)} km, "
+        f"{round(o.indicateurs.cout_estime)} {DEVISE} estimés"
         for o in options
     ]
     comparaison = " ; ".join(lignes) + (

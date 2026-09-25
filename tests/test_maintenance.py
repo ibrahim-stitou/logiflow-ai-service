@@ -256,7 +256,7 @@ def test_sinistralite_et_engin_immobilise_par_un_sinistre():
 
     assert analyse.score == sans.score - 25
     assert any(
-        "2 sinistres en 12 mois (coût net 1500 €), dont 1 en tort" in a for a in analyse.anomalies
+        "2 sinistres en 12 mois (coût net 1500 MAD), dont 1 en tort" in a for a in analyse.anomalies
     )
     assert any("SIN-2026-000002" in a for a in analyse.anomalies)
     reparation = next(r for r in analyse.recommandations if "SIN-2026-000002" in r.libelle)
