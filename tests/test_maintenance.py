@@ -300,3 +300,9 @@ def test_route_recommander_renvoie_le_type_d_engin(client, auth_headers):
 
     assert reponse.status_code == 200
     assert reponse.get_json()["vehicules"][0]["typeEngin"] == "REMORQUE"
+
+
+def test_le_statut_d_immobilisation_est_formule_en_francais():
+    (analyse,) = analyser(_requete(_vehicule(plans=[], statut="IMMOBILISE")))
+
+    assert "Le véhicule est actuellement immobilisé(e)" in analyse.anomalies

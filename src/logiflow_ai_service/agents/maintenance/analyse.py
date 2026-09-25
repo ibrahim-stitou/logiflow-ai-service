@@ -365,10 +365,9 @@ def analyser_vehicule(
         if o.statut == "EN_ATTENTE_PIECES":
             anomalies.append(f"Ordre de travail {o.reference or o.type} en attente de pièces")
 
-    if v.statut in {"EN_MAINTENANCE", "IMMOBILISE"}:
-        anomalies.append(
-            f"{_nom_engin(v).capitalize()} actuellement {v.statut.lower().replace('_', ' ')}"
-        )
+    etats = {"EN_MAINTENANCE": "en maintenance", "IMMOBILISE": "immobilisé(e)"}
+    if v.statut in etats:
+        anomalies.append(f"{_nom_engin(v).capitalize()} est actuellement {etats[v.statut]}")
 
     kms = [e.echeance.km_restant for e in echeances if e.echeance.km_restant is not None]
     dates = [e.echeance.date_echeance for e in echeances if e.echeance.date_echeance]
