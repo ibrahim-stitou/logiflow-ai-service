@@ -29,5 +29,6 @@ EXPOSE 8000
 # Workers gthread : une réponse du copilote est streamée (SSE) pendant plusieurs dizaines de
 # secondes ; des workers sync seraient bloqués un par flux. --timeout couvre un flux complet.
 # Les migrations Alembic sont appliquées au démarrage (idempotent). L'environnement virtuel est
-# utilisé directement (pas de « uv run », qui pourrait tenter de le resynchroniser).
-CMD ["sh", "-c", "alembic upgrade head && exec gunicorn --bind 0.0.0.0:8000 --workers 2 --worker-class gthread --threads 8 --timeout 180 logiflow_ai_service.wsgi:app"]
+# utilisé directement (pas de « uv run », qui pourrait tenter de le resynchroniser). Socket de
+# contrôle de gunicorn dans /tmp : le code (/app) n'est pas accessible en écriture.
+CMD ["sh", "-c", "alembic upgrade head && exec gunicorn --bind 0.0.0.0:8000 --control-socket /tmp/gunicorn.ctl --workers 2 --worker-class gthread --threads 8 --timeout 180 logiflow_ai_service.wsgi:app"]
