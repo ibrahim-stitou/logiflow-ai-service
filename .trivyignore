@@ -1,0 +1,3 @@
+# Vulnérabilités acceptées après analyse (Trivy). Une CVE par ligne, toujours justifiée :
+#   CVE-AAAA-NNNNN   # raison (non exploitable ici, pas de correctif…) - revue le AAAA-MM-JJ
+# Processus : logiflow-infra/docs/10-outils-securite.md (« Traiter une vulnérabilité »).

@@ -1,0 +1,12 @@
+# Jamais dans le contexte de build : secrets locaux et artefacts.
+.env
+.env.*
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+tests
+docs
+*.md

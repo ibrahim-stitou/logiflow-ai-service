@@ -45,32 +45,57 @@ jobs:
         run: uv run pytest
 
   docker-build:
-    name: Construction (et publication sur main) de l'image Docker
+    name: Construction, analyse (Trivy) et publication de l'image Docker
     needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      PUBLIER: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Préparer Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
       - name: Se connecter à GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: env.PUBLIER == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Publiée uniquement sur push vers main : consommée par logiflow-infra
-      # (ansible/roles/ai) pour déployer le service IA sans avoir à builder sur la cible.
-      - name: Construire (et publier) l'image du service IA
+      - name: Construire l'image du service IA
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          load: true
+          tags: logiflow-ai-service:analyse
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Analysée AVANT publication : une CVE CRITIQUE corrigeable bloque la publication.
+      - name: Analyser l'image (Trivy, bloquant sur CRITICAL corrigeable)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: logiflow-ai-service:analyse
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # Publiée uniquement sur push vers main : consommée par logiflow-infra. SBOM et
+      # provenance (SLSA) attachés à l'image.
+      - name: Publier l'image du service IA
+        if: env.PUBLIER == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          sbom: true
+          provenance: mode=max
           tags: |
             ghcr.io/${{ github.repository_owner }}/logiflow-ai-service:latest
             ghcr.io/${{ github.repository_owner }}/logiflow-ai-service:${{ github.sha }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
