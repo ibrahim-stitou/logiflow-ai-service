@@ -25,10 +25,10 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+psycopg://logiflow_ai:test@localhost:5432/logiflow_ai_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
@@ -54,21 +54,21 @@ jobs:
     env:
       PUBLIER: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Préparer Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Se connecter à GHCR
         if: env.PUBLIER == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Construire l'image du service IA
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -78,7 +78,7 @@ jobs:
 
       # Analysée AVANT publication : une CVE CRITIQUE corrigeable bloque la publication.
       - name: Analyser l'image (Trivy, bloquant sur CRITICAL corrigeable)
-        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: logiflow-ai-service:analyse
           severity: CRITICAL
@@ -89,7 +89,7 @@ jobs:
       # provenance (SLSA) attachés à l'image.
       - name: Publier l'image du service IA
         if: env.PUBLIER == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
